@@ -1,0 +1,23 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+build/
+dist/
+.cache/
+*.log
+*.tmp
+
+# Large vendor drops and local captures should stay outside the repository.
+vendor/
+driverfusionfreesetup/
+*.exe
+*.zip
+*.deb
+*.pkg
+*.so

@@ -1,0 +1,3 @@
+# ArtInChip USB Display / eM3499-Monitor userspace access.
+SUBSYSTEM=="usb", ATTR{idVendor}=="33c3", ATTR{idProduct}=="0e02", MODE="0666", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="33c3", ATTRS{idProduct}=="0e02", MODE="0666", TAG+="uaccess"

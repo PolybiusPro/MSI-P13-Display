@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "em3499-monitor"
+version = "0.1.0"
+description = "Userspace Python driver, protocol notes, and demos for the ArtInChip eM3499 USB monitor."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Alexander Romanoff" }]
+dependencies = [
+    "cryptography",
+    "hidapi",
+    "Pillow",
+    "pyusb",
+    "qrcode",
+]
+keywords = ["artinchip", "em3499", "usb-display", "pyusb", "hidapi"]
+
+[project.urls]
+Repository = "https://github.com/xormal/eM3499-Monitor"
+
+[tool.setuptools.packages.find]
+where = ["src"]
