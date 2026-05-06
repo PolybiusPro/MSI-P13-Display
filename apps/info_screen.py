@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from html.parser import HTMLParser
@@ -778,9 +779,25 @@ def cache_path_for_url(url: str) -> str:
 
 
 def normalize_background_image(img: Image.Image) -> Image.Image:
-    if img.mode == "P" and "transparency" in img.info:
-        return img.convert("RGBA").convert("RGB")
-    return img.convert("RGB")
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "error",
+                message="Palette images with Transparency expressed in bytes.*",
+                category=UserWarning,
+            )
+            if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                return flatten_transparency(img)
+            return img.convert("RGB")
+    except Exception:
+        return flatten_transparency(img)
+
+
+def flatten_transparency(img: Image.Image, background: tuple[int, int, int] = (8, 11, 17)) -> Image.Image:
+    rgba = img.convert("RGBA")
+    base = Image.new("RGBA", rgba.size, (*background, 255))
+    base.alpha_composite(rgba)
+    return base.convert("RGB")
 
 
 def fetch_image(url: str, timeout: float = 8) -> Image.Image | None:
