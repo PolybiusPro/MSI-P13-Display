@@ -777,6 +777,12 @@ def cache_path_for_url(url: str) -> str:
     return os.path.join(CACHE_DIR, f"{digest}.img")
 
 
+def normalize_background_image(img: Image.Image) -> Image.Image:
+    if img.mode == "P" and "transparency" in img.info:
+        return img.convert("RGBA").convert("RGB")
+    return img.convert("RGB")
+
+
 def fetch_image(url: str, timeout: float = 8) -> Image.Image | None:
     if not url:
         return None
@@ -785,14 +791,14 @@ def fetch_image(url: str, timeout: float = 8) -> Image.Image | None:
     try:
         if os.path.exists(path):
             with Image.open(path) as img:
-                return img.convert("RGB")
+                return normalize_background_image(img)
         req = urllib.request.Request(url, headers={"User-Agent": "aic-info-screen/0.1"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = resp.read(2_000_000)
         with open(path, "wb") as fh:
             fh.write(data)
         with Image.open(io.BytesIO(data)) as img:
-            return img.convert("RGB")
+            return normalize_background_image(img)
     except Exception:
         return None
 
