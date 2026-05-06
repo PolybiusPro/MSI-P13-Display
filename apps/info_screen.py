@@ -238,8 +238,8 @@ def hit_news_card(x: int, y: int, width: int, height: int, visible_count: int) -
 
 def button_rects(width: int, height: int) -> dict[str, tuple[int, int, int, int]]:
     return {
-        "back": (16, height - 86, 152, height - 48),
-        "qr": (width - 152, height - 86, width - 16, height - 48),
+        "back": (14, 10, 132, 48),
+        "qr": (width - 88, 10, width - 14, 48),
     }
 
 
@@ -578,12 +578,18 @@ def summarize_openai(cfg: configparser.ConfigParser, article: Article) -> tuple[
             return sentence
         return cleaned[:limit].rsplit(" ", 1)[0] or cleaned[:limit]
 
-    def prompt_variants(source: str) -> list[str]:
+    def prompt_variants(source: str, concise: bool = True) -> list[str]:
+        if concise:
+            return [
+                "Translate to Russian. Return only Russian text. Text: " + source,
+                "Translate this news text into Russian, preserving meaning and not adding facts: " + source,
+                "Russian translation only: " + source,
+                "Rewrite in concise Russian, same meaning: " + source,
+            ]
         return [
-            "Translate to Russian. Return only Russian text. Text: " + source,
-            "Translate this news text into Russian, preserving meaning and not adding facts: " + source,
-            "Russian translation only: " + source,
-            "Rewrite in concise Russian, same meaning: " + source,
+            "Translate the full news text to Russian. Return only Russian text. Do not summarize. Text: " + source,
+            "Full Russian translation only, preserving all facts and details: " + source,
+            "Translate to Russian without shortening or adding facts: " + source,
         ]
 
     def generation_variants(tokens: int) -> list[dict]:
@@ -602,7 +608,7 @@ def summarize_openai(cfg: configparser.ConfigParser, article: Article) -> tuple[
             raise RuntimeError(f"model response is too short: {meaningful_chars(cleaned)} < {min_chars}")
         return cleaned
 
-    def translate_short(text: str, limit: int, tokens: int) -> str:
+    def translate_short(text: str, limit: int, tokens: int, concise: bool = True) -> str:
         candidates = [
             compact_source(text, limit),
             compact_source(text, max(60, limit // 2)),
@@ -612,7 +618,7 @@ def summarize_openai(cfg: configparser.ConfigParser, article: Article) -> tuple[
         for candidate in candidates:
             if not candidate:
                 continue
-            for prompt_text in prompt_variants(candidate):
+            for prompt_text in prompt_variants(candidate, concise=concise):
                 for params in generation_variants(tokens):
                     try:
                         translated = completion(prompt_text, tokens, params=params)
@@ -668,7 +674,9 @@ def summarize_openai(cfg: configparser.ConfigParser, article: Article) -> tuple[
     headline = translate_short(article.title, 90, 80)
     summary_source = article.description or article.title
     summary = translate_short(summary_source, 120, 90)
-    full = translate_short(original, 180, 160)
+    full_source_limit = min(max_full_chars, max(180, len(original)))
+    full_tokens = min(520, max(180, full_source_limit // 3))
+    full = translate_short(original, full_source_limit, full_tokens, concise=False)
     language = normalize_language_prefix(article.source_language)
     return headline[:max_headline_chars], summary[:max_summary_chars], full[:max_full_chars], language
 
@@ -1043,58 +1051,93 @@ def detail_background(article: Article, width: int, height: int) -> Image.Image:
     return Image.blend(bg, Image.new("RGB", (width, height), (0, 0, 0)), 0.68)
 
 
-def render_detail(article: Article, width: int, height: int) -> Image.Image:
-    img = detail_background(article, width, height).convert("RGBA")
-    draw = ImageDraw.Draw(img)
+DETAIL_HEADER_H = 58
+DETAIL_FOOTER_H = 38
+
+
+def detail_viewport_height(height: int) -> int:
+    return max(1, height - DETAIL_HEADER_H - DETAIL_FOOTER_H)
+
+
+def detail_text_blocks(article: Article, width: int):
+    measure = Image.new("RGB", (width, 1))
+    draw = ImageDraw.Draw(measure)
     margin = 20
     title_font = font(22, bold=True)
-    summary_font = font(16)
+    body_font = font(16)
     label_font = font(12, bold=True)
-    original_font = font(12)
-    meta_font = font(14)
+    meta_font = font(13)
+    url_font = font(12)
+    text_w = width - margin * 2
 
     meta = article.topic
     if article.domain:
         meta = f"{article.topic} / {article.domain}"
-    draw.text((margin, 18), ellipsize(draw, meta.upper(), meta_font, width - margin * 2), fill=(92, 218, 255), font=meta_font)
+    title = headline_with_language(article)
+    body = article.full_ru or article.summary_ru or article.description or article.title
 
-    headline = headline_with_language(article)
-    y = 42
-    for line in wrap_text_lines(draw, headline, title_font, width - margin * 2, 2):
-        draw.text((margin, y), line, fill=(255, 255, 255), font=title_font)
-        y += 25
-
-    y += 8
-    draw.text((margin, y), "ПЕРЕВОД", fill=(92, 218, 255), font=label_font)
-    y += 18
-    summary = article.full_ru or article.summary_ru or article.description or article.title
-    for line in wrap_text_lines(draw, summary, summary_font, width - margin * 2, 7):
-        draw.text((margin, y), line, fill=(224, 233, 242), font=summary_font)
-        y += 19
-
-    y += 8
-    draw.text((margin, y), "ОРИГИНАЛ", fill=(92, 218, 255), font=label_font)
-    y += 16
-    original = article_original_text(article)
-    original_width = width - margin * 2 - (92 if article.url else 0)
-    for line in wrap_text_lines(draw, original, original_font, original_width, 4):
-        draw.text((margin, y), line, fill=(182, 194, 206), font=original_font)
-        y += 14
-
+    blocks = [
+        ("meta", [ellipsize(draw, meta.upper(), meta_font, text_w)], meta_font, (92, 218, 255), 17),
+        ("title", wrap_text_lines(draw, title, title_font, text_w, 24), title_font, (255, 255, 255), 26),
+        ("label", ["ПОЛНЫЙ ТЕКСТ"], label_font, (92, 218, 255), 17),
+        ("body", wrap_text_lines(draw, body, body_font, text_w, 160), body_font, (224, 233, 242), 20),
+    ]
     if article.url:
-        url_font = font(12)
-        link_width = width - margin * 2 - 96
-        draw.text((margin, height - 122), ellipsize(draw, article.url, url_font, link_width), fill=(160, 174, 188), font=url_font)
-        qr_size = 64
-        qr_img = make_qr(article, qr_size)
-        qr_x = width - margin - qr_size
-        qr_y = height - 164
-        img.paste(qr_img.convert("RGBA"), (qr_x, qr_y))
-        draw.rounded_rectangle((qr_x - 4, qr_y - 4, qr_x + qr_size + 4, qr_y + qr_size + 4), radius=6, outline=(108, 207, 238), width=1)
+        blocks.extend(
+            [
+                ("label", ["ССЫЛКА"], label_font, (92, 218, 255), 17),
+                ("url", wrap_text_lines(draw, article.url, url_font, text_w, 4), url_font, (160, 174, 188), 15),
+            ]
+        )
+    return blocks
+
+
+def detail_content_height(article: Article, width: int) -> int:
+    blocks = detail_text_blocks(article, width)
+    y = 16
+    for _, lines, _, _, line_h in blocks:
+        y += len(lines) * line_h + 12
+    return y + 10
+
+
+def detail_max_scroll(article: Article, width: int, height: int) -> int:
+    return max(0, detail_content_height(article, width) - detail_viewport_height(height))
+
+
+def render_detail(article: Article, width: int, height: int, scroll_y: int = 0) -> Image.Image:
+    img = detail_background(article, width, height).convert("RGBA")
+    margin = 20
+    viewport_h = detail_viewport_height(height)
+    content_h = detail_content_height(article, width)
+    max_scroll = max(0, content_h - viewport_h)
+    scroll_y = max(0, min(int(scroll_y), max_scroll))
+
+    content = Image.new("RGBA", (width, content_h), (0, 0, 0, 0))
+    content_draw = ImageDraw.Draw(content)
+    y = 16
+    for _, lines, fnt, color, line_h in detail_text_blocks(article, width):
+        for line in lines:
+            content_draw.text((margin, y), line, fill=color, font=fnt)
+            y += line_h
+        y += 12
+
+    visible = content.crop((0, scroll_y, width, scroll_y + viewport_h))
+    img.alpha_composite(visible, (0, DETAIL_HEADER_H))
+
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((0, 0, width, DETAIL_HEADER_H), fill=(0, 0, 0, 185))
 
     rects = button_rects(width, height)
     render_button(draw, rects["back"], "Назад")
     render_button(draw, rects["qr"], "QR")
+    if max_scroll > 0:
+        track_top = DETAIL_HEADER_H + 8
+        track_bottom = height - DETAIL_FOOTER_H - 8
+        track_h = max(1, track_bottom - track_top)
+        thumb_h = max(24, int(track_h * viewport_h / content_h))
+        thumb_y = track_top + int((track_h - thumb_h) * scroll_y / max_scroll)
+        draw.rounded_rectangle((width - 8, track_top, width - 4, track_bottom), radius=2, fill=(255, 255, 255, 42))
+        draw.rounded_rectangle((width - 9, thumb_y, width - 3, thumb_y + thumb_h), radius=3, fill=(108, 207, 238, 190))
     render_footer_clock(img, width, height)
     return img.convert("RGB")
 
@@ -1114,21 +1157,23 @@ def render_qr(article: Article, width: int, height: int) -> Image.Image:
     title_font = font(20, bold=True)
     small_font = font(13)
     margin = 22
-    title = headline_with_language(article)
-    draw.text((margin, 20), ellipsize(draw, title, title_font, width - margin * 2), fill=(248, 250, 252), font=title_font)
+    draw.rectangle((0, 0, width, DETAIL_HEADER_H), fill=(0, 0, 0, 185))
+    rects = button_rects(width, height)
+    render_button(draw, rects["back"], "Назад")
 
-    qr_size = min(width - 104, height - 178)
+    title = headline_with_language(article)
+    draw.text((margin, DETAIL_HEADER_H + 12), ellipsize(draw, title, title_font, width - margin * 2), fill=(248, 250, 252), font=title_font)
+
+    qr_size = min(width - 104, height - 210)
     qr_img = make_qr(article, qr_size)
     qr_x = (width - qr_size) // 2
-    qr_y = 76
+    qr_y = DETAIL_HEADER_H + 56
     img.paste(qr_img.convert("RGBA"), (qr_x, qr_y))
     draw.rounded_rectangle((qr_x - 8, qr_y - 8, qr_x + qr_size + 8, qr_y + qr_size + 8), radius=8, outline=(108, 207, 238), width=2)
 
     if article.domain:
         draw.text((margin, qr_y + qr_size + 20), ellipsize(draw, article.domain, small_font, width - margin * 2), fill=(170, 184, 198), font=small_font)
 
-    rects = button_rects(width, height)
-    render_button(draw, rects["back"], "Назад")
     render_footer_clock(img, width, height)
     return img.convert("RGB")
 
@@ -1325,6 +1370,7 @@ def run(config_path: str, once: bool):
     seen_article_signature: tuple[tuple[str, str], ...] = ()
     mode = "list"
     selected_index = 0
+    detail_scroll = 0
     autoplay = True
     fast_until = time.monotonic()
     suppress_card_taps_until = 0.0
@@ -1343,6 +1389,7 @@ def run(config_path: str, once: bool):
                 slide_started = now
                 transition_started = now
                 selected_index = 0
+                detail_scroll = 0
                 mode = "list"
                 fast_until = now + max(0.5, animation_seconds)
             if view_start >= len(articles):
@@ -1351,6 +1398,7 @@ def run(config_path: str, once: bool):
                 slide_started = now
             if selected_index >= len(articles):
                 selected_index = 0
+                detail_scroll = 0
 
             while True:
                 try:
@@ -1381,8 +1429,11 @@ def run(config_path: str, once: bool):
                         view_start = scroll_index(view_start, delta, len(articles))
                         previous_view_start = view_start
                     elif mode == "detail":
-                        selected_index = scroll_index(selected_index, delta, len(articles))
-                    mode = "list" if mode == "qr" else mode
+                        max_detail_scroll = detail_max_scroll(articles[selected_index], params.width, params.height)
+                        detail_scroll = max(0, min(max_detail_scroll, detail_scroll - action.dy))
+                    if mode == "qr":
+                        mode = "list"
+                        detail_scroll = 0
                     autoplay = False
                     slide_started = now
                     transition_started = now - animation_seconds
@@ -1402,6 +1453,7 @@ def run(config_path: str, once: bool):
                     slot = hit_news_card(action.x, action.y, params.width, params.height, visible_count)
                     if slot is not None:
                         selected_index = (view_start + slot) % len(articles)
+                        detail_scroll = 0
                         mode = "detail"
                         autoplay = False
                         fast_until = now + 0.8
@@ -1411,6 +1463,7 @@ def run(config_path: str, once: bool):
                     button = hit_button(action.x, action.y, button_rects(params.width, params.height))
                     if button == "back":
                         mode = "list"
+                        detail_scroll = 0
                         suppress_card_taps_until = now + back_debounce_seconds
                         fast_until = now + 0.8
                     elif button == "qr":
@@ -1439,7 +1492,9 @@ def run(config_path: str, once: bool):
                 transition_progress = 1.0
             active_render = transition_progress < 1.0 or now < fast_until
             if mode == "detail":
-                img = render_detail(articles[selected_index], params.width, params.height)
+                max_detail_scroll = detail_max_scroll(articles[selected_index], params.width, params.height)
+                detail_scroll = max(0, min(detail_scroll, max_detail_scroll))
+                img = render_detail(articles[selected_index], params.width, params.height, detail_scroll)
             elif mode == "qr":
                 img = render_qr(articles[selected_index], params.width, params.height)
             else:
