@@ -261,6 +261,10 @@ def article_signature(articles: list[Article]) -> tuple[tuple[str, str], ...]:
     return tuple((article.url, article.headline_ru or article.title) for article in articles)
 
 
+def article_urls(articles: list[Article]) -> tuple[str, ...]:
+    return tuple(article.url for article in articles if article.url)
+
+
 def has_translation(article: Article) -> bool:
     return bool(article.url and article.headline_ru and article.summary_ru and article.full_ru)
 
@@ -1565,7 +1569,6 @@ def run(config_path: str, once: bool):
     quality = cfg_int(cfg, "display", "quality", 60)
     subsampling = cfg_int(cfg, "display", "subsampling", 2)
     chunk_size = cfg_int(cfg, "display", "chunk_size", 4096)
-    slide_seconds = cfg_float(cfg, "display", "slide_seconds", 12)
     visible_count = max(1, cfg_int(cfg, "display", "visible_news", 9))
     animation_seconds = max(0.0, cfg_float(cfg, "display", "animation_seconds", 2))
     idle_frame_interval = max(0.2, cfg_float(cfg, "display", "idle_frame_interval_seconds", cfg_float(cfg, "display", "frame_interval_seconds", 1.0)))
@@ -1606,10 +1609,10 @@ def run(config_path: str, once: bool):
     slide_started = time.monotonic()
     transition_started = slide_started - animation_seconds
     seen_article_signature: tuple[tuple[str, str], ...] = ()
+    seen_article_urls: tuple[str, ...] = ()
     mode = "list"
     selected_index = 0
     detail_scroll = 0
-    autoplay = True
     fast_until = time.monotonic()
     suppress_card_taps_until = 0.0
 
@@ -1620,16 +1623,29 @@ def run(config_path: str, once: bool):
             if not articles:
                 articles = [loading_article()]
             current_signature = article_signature(articles)
+            current_urls = article_urls(articles)
             if current_signature != seen_article_signature:
+                previous_urls = seen_article_urls
                 seen_article_signature = current_signature
-                view_start = 0
-                previous_view_start = 0
-                slide_started = now
-                transition_started = now
-                selected_index = 0
-                detail_scroll = 0
-                mode = "list"
-                fast_until = now + max(0.5, animation_seconds)
+                seen_article_urls = current_urls
+                new_urls = [url for url in current_urls if url not in previous_urls]
+                if previous_urls and new_urls and mode == "list":
+                    previous_view_start = view_start
+                    view_start = next((idx for idx, article in enumerate(articles) if article.url in new_urls), view_start)
+                    slide_started = now
+                    transition_started = now
+                    fast_until = now + max(0.5, animation_seconds)
+                    if verbose:
+                        print(f"news list updated: {len(new_urls)} new article(s), start {view_start + 1}")
+                elif not previous_urls:
+                    view_start = 0
+                    previous_view_start = 0
+                    slide_started = now
+                    transition_started = now - animation_seconds
+                    fast_until = now + 0.5
+                if selected_index >= len(articles):
+                    selected_index = 0
+                    detail_scroll = 0
             if view_start >= len(articles):
                 view_start = 0
                 previous_view_start = 0
@@ -1647,14 +1663,14 @@ def run(config_path: str, once: bool):
                 if action.kind == "double_tap":
                     if mode != "list":
                         mode = "list"
-                        autoplay = True
                     else:
-                        autoplay = not autoplay
+                        previous_view_start = view_start
+                        view_start = scroll_index(view_start, 1, len(articles))
                     slide_started = now
-                    transition_started = now - animation_seconds
+                    transition_started = now if previous_view_start != view_start else now - animation_seconds
                     fast_until = now + 0.8
                     if verbose:
-                        print(f"touch double_tap: mode={mode}, autoplay={autoplay}")
+                        print(f"touch double_tap: mode={mode}, start={view_start + 1}")
                     continue
 
                 if action.kind == "drag":
@@ -1672,7 +1688,6 @@ def run(config_path: str, once: bool):
                     if mode == "qr":
                         mode = "list"
                         detail_scroll = 0
-                    autoplay = False
                     slide_started = now
                     transition_started = now - animation_seconds
                     fast_until = now + 0.8
@@ -1693,7 +1708,6 @@ def run(config_path: str, once: bool):
                         selected_index = (view_start + slot) % len(articles)
                         detail_scroll = 0
                         mode = "detail"
-                        autoplay = False
                         fast_until = now + 0.8
                         if verbose:
                             print(f"touch tap: open detail {selected_index + 1}/{len(articles)}")
@@ -1716,13 +1730,6 @@ def run(config_path: str, once: bool):
                         fast_until = now + 0.8
                     if verbose and button:
                         print(f"touch tap: button={button}, mode={mode}")
-
-            if mode == "list" and autoplay and now - slide_started >= slide_seconds:
-                previous_view_start = view_start
-                view_start = (view_start + 1) % len(articles)
-                slide_started = now
-                transition_started = now
-                fast_until = now + max(0.5, animation_seconds)
 
             if animation_seconds > 0:
                 transition_progress = min(1.0, (now - transition_started) / animation_seconds)
