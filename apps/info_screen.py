@@ -396,6 +396,8 @@ def post_json_with_retries(
             last_exc = exc
             if "empty JSON response" in str(exc):
                 break
+            if any(marker in str(exc) for marker in ("HTTP Error 404", "HTTP/1.1 404", "HTTP Error 405", "HTTP/1.1 405")):
+                break
             if attempt >= attempts - 1:
                 break
             delay = retry_delay * (attempt + 1)
@@ -517,6 +519,7 @@ def meaningful_chars(text: str) -> int:
 def summarize_openai(cfg: configparser.ConfigParser, article: Article) -> tuple[str, str, str, str]:
     base_url = cfg.get("model", "base_url", fallback="http://192.168.228.55:8085").rstrip("/")
     model = cfg.get("model", "model", fallback="local-model")
+    model_api = cfg.get("model", "api", fallback="").strip().lower()
     timeout = cfg_float(cfg, "model", "timeout_seconds", 45)
     retries = cfg_int(cfg, "model", "retries", 2)
     retry_delay = cfg_float(cfg, "model", "retry_delay_seconds", 2.0)
@@ -545,29 +548,97 @@ def summarize_openai(cfg: configparser.ConfigParser, article: Article) -> tuple[
         f"Описание: {article.description}\n"
         f"Источник: {article.domain}"
     )
-    def completion(prompt_text: str, tokens: int = 120, params: dict | None = None) -> str:
-        generation = {
-            "prompt": prompt_text,
-            "temperature": temperature,
-            "n_predict": tokens,
-            "max_tokens": tokens,
-            "cache_prompt": False,
-            "id_slot": 0,
-        }
-        if params:
-            generation.update(params)
+
+    if not model_api:
+        model_api = "openai_chat" if chat_completions else "llama_cpp"
+
+    def model_url(kind: str) -> str:
+        parsed_path = urllib.parse.urlparse(base_url).path.rstrip("/")
+        if kind == "chat":
+            if parsed_path.endswith("/v1/chat/completions"):
+                return base_url
+            if parsed_path.endswith("/v1"):
+                return base_url + "/chat/completions"
+            return base_url + "/v1/chat/completions"
+        if parsed_path.endswith("/completion"):
+            return base_url
+        return base_url + "/completion"
+
+    def chat_completion(prompt_text: str, tokens: int = 260) -> str:
         data = post_json_with_retries(
-            f"{base_url}/completion",
-            generation,
+            model_url("chat"),
+            {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": "Ты переводчик и редактор русскоязычного новостного экрана."},
+                    {"role": "user", "content": prompt_text},
+                ],
+                "temperature": temperature,
+                "max_tokens": tokens,
+            },
             timeout,
             retries,
             retry_delay,
             verbose,
         )
-        content = strip_model_thinking(str(data.get("content", ""))).strip()
-        if not content:
-            raise RuntimeError("model returned empty content")
-        return content
+        choices = data.get("choices") or []
+        if choices:
+            first = choices[0]
+            message = first.get("message") if isinstance(first, dict) else None
+            if isinstance(message, dict):
+                content = strip_model_thinking(str(message.get("content", ""))).strip()
+                if content:
+                    return content
+            content = strip_model_thinking(str(first.get("text", "") if isinstance(first, dict) else "")).strip()
+            if content:
+                return content
+        content = strip_model_thinking(str(data.get("content", "") or data.get("response", ""))).strip()
+        if content:
+            return content
+        raise RuntimeError("chat model returned empty content")
+
+    def completion(prompt_text: str, tokens: int = 120, params: dict | None = None) -> str:
+        def llama_completion() -> str:
+            generation = {
+                "prompt": prompt_text,
+                "temperature": temperature,
+                "n_predict": tokens,
+                "max_tokens": tokens,
+                "cache_prompt": False,
+                "id_slot": 0,
+            }
+            if params:
+                generation.update(params)
+            data = post_json_with_retries(
+                model_url("completion"),
+                generation,
+                timeout,
+                retries,
+                retry_delay,
+                verbose,
+            )
+            content = strip_model_thinking(str(data.get("content", "") or data.get("response", ""))).strip()
+            if not content:
+                raise RuntimeError("model returned empty content")
+            return content
+
+        if model_api in ("openai", "openai_chat", "chat", "chat_completions"):
+            return chat_completion(prompt_text, tokens)
+        if model_api in ("llama", "llama_cpp", "completion"):
+            return llama_completion()
+        if model_api != "auto":
+            raise RuntimeError(f"unsupported model api: {model_api}")
+
+        order = (chat_completion, llama_completion) if chat_completions else (llama_completion, chat_completion)
+        errors = []
+        for fn in order:
+            try:
+                return fn(prompt_text, tokens) if fn is chat_completion else fn()
+            except Exception as exc:
+                errors.append(str(exc))
+                if verbose:
+                    print(f"model endpoint fallback after error: {exc}")
+        raise RuntimeError("; ".join(errors))
 
     def compact_source(text: str, limit: int) -> str:
         cleaned = " ".join(text.split())
@@ -636,23 +707,7 @@ def summarize_openai(cfg: configparser.ConfigParser, article: Article) -> tuple[
 
     if chat_completions:
         try:
-            data = post_json_with_retries(
-                f"{base_url}/v1/chat/completions",
-                {
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": "Ты редактор кратких русскоязычных новостных экранов."},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": temperature,
-                    "max_tokens": 260,
-                },
-                timeout,
-                retries,
-                retry_delay,
-                verbose,
-            )
-            text = data["choices"][0]["message"]["content"].strip()
+            text = chat_completion(prompt, 260)
             result = parse_model_news_pair(text, max_headline_chars, max_summary_chars, max_full_chars)
             if result[0] and result[1]:
                 return result
