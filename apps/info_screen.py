@@ -652,7 +652,7 @@ def summarize_openai(cfg: configparser.ConfigParser, article: Article) -> tuple[
                 raise RuntimeError("model returned empty content")
             return content
 
-        if model_api in ("openai", "openai_chat", "chat", "chat_completions"):
+        if model_api in ("openai", "openai_chat", "chat", "chat_completions", "vllm", "vllm_chat"):
             return chat_completion(prompt_text, tokens)
         if model_api in ("ollama", "ollama_generate", "ollama_api"):
             return ollama_generate()
