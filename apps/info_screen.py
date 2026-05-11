@@ -10,6 +10,7 @@ import io
 import json
 import os
 import queue
+import select
 import subprocess
 import threading
 import time
@@ -354,29 +355,139 @@ def post_json_via_nc(url: str, payload: dict, timeout: float) -> dict:
         "Connection: close\r\n"
         "\r\n"
     ).encode("ascii") + body
-    result = subprocess.run(
-        ["nc", "-w", str(max(1, int(timeout))), parsed.hostname, str(port)],
-        input=request,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=timeout + 2,
-        check=False,
-    )
-    if result.returncode != 0:
-        stderr = result.stderr.decode("utf-8", errors="replace").strip()
-        raise RuntimeError(stderr or f"nc exited with code {result.returncode}")
-    header, sep, response_body = result.stdout.partition(b"\r\n\r\n")
-    if not sep:
+    raw, stderr, returncode = run_nc_http_request(parsed.hostname, port, request, timeout)
+    if returncode not in (0, None) and not raw:
+        raise RuntimeError(stderr or f"nc exited with code {returncode}")
+    header, response_body = split_final_http_response(raw)
+    if not header:
         raise RuntimeError("invalid HTTP response from nc fallback")
     status_line = header.splitlines()[0].decode("ascii", errors="replace")
     parts = status_line.split()
     status = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
     if status < 200 or status >= 300:
         raise RuntimeError(status_line)
+    if has_chunked_transfer(header):
+        response_body = decode_chunked_body(response_body)
     data = response_body.decode("utf-8", errors="replace")
     if not data.strip():
         raise RuntimeError(f"empty JSON response from {url}")
     return json.loads(data)
+
+
+def run_nc_http_request(host: str, port: int, request: bytes, timeout: float) -> tuple[bytes, str, int | None]:
+    # vLLM/uvicorn cancels generation when the client half-closes immediately.
+    # Keep nc stdin open while reading the response instead of using communicate(input=...).
+    proc = subprocess.Popen(
+        ["nc", "-w", str(max(1, int(timeout))), host, str(port)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert proc.stdin is not None
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+    chunks: list[bytes] = []
+    errors: list[bytes] = []
+    deadline = time.monotonic() + timeout + 2
+    try:
+        proc.stdin.write(request)
+        proc.stdin.flush()
+        streams = [proc.stdout, proc.stderr]
+        while time.monotonic() < deadline:
+            readable, _, _ = select.select(streams, [], [], min(0.25, max(0.0, deadline - time.monotonic())))
+            for stream in readable:
+                data = os.read(stream.fileno(), 8192)
+                if stream is proc.stdout:
+                    if data:
+                        chunks.append(data)
+                elif data:
+                    errors.append(data)
+            raw = b"".join(chunks)
+            if raw and http_response_complete(raw):
+                break
+            if proc.poll() is not None:
+                for stream, target in ((proc.stdout, chunks), (proc.stderr, errors)):
+                    while True:
+                        readable, _, _ = select.select([stream], [], [], 0)
+                        if not readable:
+                            break
+                        data = os.read(stream.fileno(), 8192)
+                        if not data:
+                            break
+                        target.append(data)
+                break
+        return b"".join(chunks), b"".join(errors).decode("utf-8", errors="replace").strip(), proc.poll()
+    finally:
+        try:
+            proc.stdin.close()
+        except Exception:
+            pass
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+
+def split_final_http_response(raw: bytes) -> tuple[bytes, bytes]:
+    rest = raw
+    while True:
+        header, sep, body = rest.partition(b"\r\n\r\n")
+        if not sep:
+            return b"", b""
+        status_line = header.splitlines()[0].decode("ascii", errors="replace")
+        parts = status_line.split()
+        status = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        if 100 <= status < 200:
+            rest = body
+            continue
+        return header, body
+
+
+def has_chunked_transfer(header: bytes) -> bool:
+    return b"transfer-encoding: chunked" in header.lower()
+
+
+def content_length_from_header(header: bytes) -> int | None:
+    for line in header.splitlines()[1:]:
+        name, sep, value = line.partition(b":")
+        if sep and name.strip().lower() == b"content-length":
+            try:
+                return int(value.strip())
+            except ValueError:
+                return None
+    return None
+
+
+def http_response_complete(raw: bytes) -> bool:
+    header, body = split_final_http_response(raw)
+    if not header:
+        return False
+    if has_chunked_transfer(header):
+        return b"\r\n0\r\n" in body or b"\r\n0\r\n\r\n" in body
+    length = content_length_from_header(header)
+    return length is not None and len(body) >= length
+
+
+def decode_chunked_body(body: bytes) -> bytes:
+    out = bytearray()
+    rest = body
+    while rest:
+        line, sep, rest = rest.partition(b"\r\n")
+        if not sep:
+            break
+        try:
+            size = int(line.split(b";", 1)[0].strip(), 16)
+        except ValueError:
+            return body
+        if size == 0:
+            break
+        if len(rest) < size:
+            return body
+        out.extend(rest[:size])
+        rest = rest[size + 2 :] if rest[size : size + 2] == b"\r\n" else rest[size:]
+    return bytes(out)
 
 
 def post_json_with_retries(
