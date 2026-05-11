@@ -261,6 +261,23 @@ def article_signature(articles: list[Article]) -> tuple[tuple[str, str], ...]:
     return tuple((article.url, article.headline_ru or article.title) for article in articles)
 
 
+def has_translation(article: Article) -> bool:
+    return bool(article.url and article.headline_ru and article.summary_ru and article.full_ru)
+
+
+def translated_article_by_url(articles: list[Article]) -> dict[str, Article]:
+    return {article.url: article for article in articles if has_translation(article)}
+
+
+def reuse_translation(article: Article, cached: Article) -> Article:
+    article.description = cached.description or article.description
+    article.headline_ru = cached.headline_ru
+    article.summary_ru = cached.summary_ru
+    article.full_ru = cached.full_ru
+    article.source_language = cached.source_language or article.source_language
+    return article
+
+
 def http_get_json(url: str, params: dict[str, str | int], timeout: float) -> dict:
     full_url = url + "?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(full_url, headers={"User-Agent": "aic-info-screen/0.1"})
@@ -893,6 +910,7 @@ def summarize_articles(
     verbose: bool,
     on_article: Callable[[Article], None] | None = None,
     stop_event: threading.Event | None = None,
+    known_articles: dict[str, Article] | None = None,
 ) -> list[Article]:
     enabled = cfg_bool(cfg, "model", "enabled", True)
     max_summary_chars = cfg_int(cfg, "model", "max_chars", 120)
@@ -904,10 +922,18 @@ def summarize_articles(
     for article in articles:
         if stop_event is not None and stop_event.is_set():
             break
+        cached = known_articles.get(article.url) if known_articles is not None else None
+        if cached is not None:
+            translated.append(reuse_translation(article, cached))
+            if verbose:
+                print(f"model cache hit: {article.topic}: {article.url}")
+            continue
         article.description = fetch_article_description(article.url, timeout=description_timeout)
         if not enabled:
             article.headline_ru, article.summary_ru, article.full_ru, article.source_language = fallback_news_pair(article, max_headline_chars, max_summary_chars, max_full_chars)
             translated.append(article)
+            if known_articles is not None and article.url:
+                known_articles[article.url] = article
             if on_article is not None:
                 on_article(article)
             continue
@@ -920,6 +946,8 @@ def summarize_articles(
             if not article.headline_ru or not article.summary_ru:
                 raise RuntimeError("model returned empty headline or summary")
             translated.append(article)
+            if known_articles is not None and article.url:
+                known_articles[article.url] = article
             if on_article is not None:
                 on_article(article)
             if verbose:
@@ -935,6 +963,7 @@ def load_news(
     verbose: bool,
     on_article: Callable[[Article], None] | None = None,
     stop_event: threading.Event | None = None,
+    existing_articles: list[Article] | None = None,
 ) -> list[Article]:
     if not cfg.has_section("topics"):
         raise RuntimeError("config has no [topics] section")
@@ -945,6 +974,7 @@ def load_news(
     retries = cfg_int(cfg, "gdelt", "retries", 1)
     retry_after_429 = cfg_float(cfg, "gdelt", "retry_after_429_seconds", 30)
     translated: list[Article] = []
+    known_articles = translated_article_by_url(existing_articles or [])
     topics = list(cfg.items("topics"))
     for index, (topic, query) in enumerate(topics):
         if stop_event is not None and stop_event.is_set():
@@ -968,7 +998,16 @@ def load_news(
             )
             if verbose:
                 print(f"gdelt {topic}: {len(batch)} articles")
-            translated.extend(summarize_articles(cfg, batch, verbose, on_article=on_article, stop_event=stop_event))
+            translated.extend(
+                summarize_articles(
+                    cfg,
+                    batch,
+                    verbose,
+                    on_article=on_article,
+                    stop_event=stop_event,
+                    known_articles=known_articles,
+                )
+            )
         except Exception as exc:
             if verbose:
                 print(f"gdelt failed for {topic}: {exc}")
@@ -1505,7 +1544,8 @@ def refresh_worker(
     while not stop_event.is_set():
         state.start_refresh()
         try:
-            fresh = load_news(cfg, verbose, on_article=state.add_article, stop_event=stop_event)
+            existing = state.get_articles()
+            fresh = load_news(cfg, verbose, on_article=state.add_article, stop_event=stop_event, existing_articles=existing)
             state.finish_refresh(fresh)
             if verbose:
                 print(f"news refresh complete: {len(fresh)} articles")
