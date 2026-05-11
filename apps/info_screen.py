@@ -560,6 +560,14 @@ def summarize_openai(cfg: configparser.ConfigParser, article: Article) -> tuple[
             if parsed_path.endswith("/v1"):
                 return base_url + "/chat/completions"
             return base_url + "/v1/chat/completions"
+        if kind == "ollama_chat":
+            if parsed_path.endswith("/api/chat"):
+                return base_url
+            return base_url + "/api/chat"
+        if kind == "ollama_generate":
+            if parsed_path.endswith("/api/generate"):
+                return base_url
+            return base_url + "/api/generate"
         if parsed_path.endswith("/completion"):
             return base_url
         return base_url + "/completion"
@@ -598,6 +606,28 @@ def summarize_openai(cfg: configparser.ConfigParser, article: Article) -> tuple[
         raise RuntimeError("chat model returned empty content")
 
     def completion(prompt_text: str, tokens: int = 120, params: dict | None = None) -> str:
+        def ollama_generate() -> str:
+            data = post_json_with_retries(
+                model_url("ollama_generate"),
+                {
+                    "model": model,
+                    "prompt": prompt_text,
+                    "stream": False,
+                    "options": {
+                        "temperature": temperature,
+                        "num_predict": tokens,
+                    },
+                },
+                timeout,
+                retries,
+                retry_delay,
+                verbose,
+            )
+            content = strip_model_thinking(str(data.get("response", "") or data.get("content", ""))).strip()
+            if content:
+                return content
+            raise RuntimeError("ollama model returned empty content")
+
         def llama_completion() -> str:
             generation = {
                 "prompt": prompt_text,
@@ -624,12 +654,14 @@ def summarize_openai(cfg: configparser.ConfigParser, article: Article) -> tuple[
 
         if model_api in ("openai", "openai_chat", "chat", "chat_completions"):
             return chat_completion(prompt_text, tokens)
+        if model_api in ("ollama", "ollama_generate", "ollama_api"):
+            return ollama_generate()
         if model_api in ("llama", "llama_cpp", "completion"):
             return llama_completion()
         if model_api != "auto":
             raise RuntimeError(f"unsupported model api: {model_api}")
 
-        order = (chat_completion, llama_completion) if chat_completions else (llama_completion, chat_completion)
+        order = (chat_completion, ollama_generate, llama_completion) if chat_completions else (llama_completion, ollama_generate, chat_completion)
         errors = []
         for fn in order:
             try:
@@ -705,7 +737,7 @@ def summarize_openai(cfg: configparser.ConfigParser, article: Article) -> tuple[
                             time.sleep(variant_retry_delay)
         raise last_exc or RuntimeError("empty text for translation")
 
-    if chat_completions:
+    if chat_completions and model_api not in ("ollama", "ollama_generate", "ollama_api", "llama", "llama_cpp", "completion"):
         try:
             text = chat_completion(prompt, 260)
             result = parse_model_news_pair(text, max_headline_chars, max_summary_chars, max_full_chars)
