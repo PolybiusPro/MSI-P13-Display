@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Small documented userspace driver for the ArtInChip USB display.
+"""Userspace driver for the MSI P13 USB display panel.
 
-Tested with the eM3499-Monitor / ArtInChip USB Display device:
+Tested with the MSI P13 display (ArtInChip USB controller):
 
     VID:PID 33c3:0e02
-    Product eM3499-Monitor
+    Product MSI P13 / ArtInChip USB Display
     Serial  2024123456
     Mode    480x480, JPEG media format 0x10
 
@@ -13,7 +13,7 @@ little-endian ArtInChip frame header. Before frames are accepted, the host must
 complete the two-step RSA challenge/response handshake implemented below.
 
 This module intentionally avoids any vendor binary library. It uses PyUSB for
-the vendor bulk display interface and hidapi for the optional touch interface.
+the vendor bulk display interface.
 """
 
 from __future__ import annotations
@@ -22,8 +22,6 @@ import io
 import os
 import random
 import struct
-import subprocess
-import sys
 from dataclasses import dataclass
 
 import usb.core
@@ -70,8 +68,22 @@ class DeviceParams:
     fps: int
 
 
-class ArtInChipDisplay:
-    """A direct USB connection to the ArtInChip display bulk interface."""
+class UsbDeviceLostError(RuntimeError):
+    """Raised when the USB panel disconnects during use."""
+
+
+def is_device_gone_error(exc: BaseException) -> bool:
+    """Return True for errors that mean the USB panel is unplugged or unavailable."""
+
+    if isinstance(exc, usb.core.USBError):
+        # 19=ENODEV, 5=EIO, 32=EPIPE
+        return exc.errno in {19, 5, 32}
+    message = str(exc).lower()
+    return "not found" in message or "no such device" in message or "disconnected" in message
+
+
+class MsiP13Display:
+    """A direct USB connection to the MSI P13 display bulk interface."""
 
     def __init__(self, vid: int = VID, pid: int = PID, chunk_size: int = 4096):
         self.vid = vid
@@ -98,7 +110,6 @@ class ArtInChipDisplay:
             if self.dev.is_kernel_driver_active(0):
                 self.dev.detach_kernel_driver(0)
         except (NotImplementedError, usb.core.USBError):
-            # macOS does not expose detach_kernel_driver through libusb.
             pass
 
         usb.util.claim_interface(self.dev, 0)
@@ -131,6 +142,14 @@ class ArtInChipDisplay:
                 usb.util.release_interface(self.dev, 0)
             except Exception:
                 pass
+        self.dev = None
+        self.ep_out = None
+        self.ep_in = None
+
+    def _raise_if_disconnected(self, exc: BaseException) -> None:
+        if is_device_gone_error(exc):
+            raise UsbDeviceLostError("USB display disconnected") from exc
+        raise exc
 
     def get_params(self) -> DeviceParams:
         """Read the 16-byte device mode block with vendor control request 0."""
@@ -147,12 +166,15 @@ class ArtInChipDisplay:
         )
         return DeviceParams(*struct.unpack_from("<HHHHHHHH", raw))
 
-    def write_all(self, data: bytes, timeout: int = 1000):
+    def write_all(self, data: bytes, timeout: int = 2000):
         """Write a buffer to the bulk OUT endpoint in bounded chunks."""
 
         pos = 0
         while pos < len(data):
-            pos += self.ep_out.write(data[pos : pos + self.chunk_size], timeout)
+            try:
+                pos += self.ep_out.write(data[pos : pos + self.chunk_size], timeout)
+            except usb.core.USBError as exc:
+                self._raise_if_disconnected(exc)
 
     def send_command(self, command: int):
         """Send an authentication command using the same 20-byte header shape."""
@@ -173,14 +195,20 @@ class ArtInChipDisplay:
         encrypted = key.encrypt(challenge, padding.PKCS1v15())
         self.send_command(AUTH_DEV_CMD)
         self.write_all(encrypted)
-        response = bytes(self.ep_in.read(256, timeout=1000))
+        try:
+            response = bytes(self.ep_in.read(256, timeout=1000))
+        except usb.core.USBError as exc:
+            self._raise_if_disconnected(exc)
         if response != challenge:
             raise RuntimeError("device authentication failed")
 
         # Phase 2: device sends an RSA type-1 padded block. The host performs
         # public-key recovery and returns the clear payload.
         self.send_command(AUTH_HOST_CMD)
-        signature = bytes(self.ep_in.read(256, timeout=1000))
+        try:
+            signature = bytes(self.ep_in.read(256, timeout=1000))
+        except usb.core.USBError as exc:
+            self._raise_if_disconnected(exc)
         clear = public_decrypt_pkcs1_type1(signature, numbers.n, numbers.e, rsa_size)
         self.write_all(clear)
 
@@ -227,32 +255,9 @@ def public_decrypt_pkcs1_type1(signature: bytes, n: int, e: int, size: int) -> b
     return block[sep + 1 :]
 
 
-def print_platform_hints():
+def print_platform_hints(*, file=None):
     """Print short actionable hints for common permission problems."""
 
-    if sys.platform == "darwin":
-        print("macOS hint: install libusb with Homebrew and run from a venv.")
-        print("  brew install libusb hidapi")
-    elif sys.platform.startswith("linux"):
-        print("Linux hint: add the udev rule from scripts/99-artinchip-usb-display.rules")
-        print("or run the test once with sudo to confirm it is a permissions issue.")
+    print("Linux hint: add the udev rule from scripts/99-msi-p13-display.rules", file=file)
+    print("or run the test once with sudo to confirm it is a permissions issue.", file=file)
 
-
-def nc_http_post(host: str, port: int, request: bytes, timeout_seconds: int = 5) -> bytes:
-    """Tiny helper used by other projects when Python sockets cannot route.
-
-    It is not needed for display transport. It documents the practical fallback
-    used during the information-screen work for a local llama.cpp endpoint.
-    """
-
-    result = subprocess.run(
-        ["nc", "-w", str(timeout_seconds), host, str(port)],
-        input=request,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-        timeout=timeout_seconds + 2,
-    )
-    if result.returncode:
-        raise RuntimeError(result.stderr.decode("utf-8", errors="replace").strip())
-    return result.stdout

@@ -3,24 +3,28 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "em3499-monitor"
+name = "msi-p13-display"
 version = "0.1.0"
-description = "Userspace Python driver, protocol notes, and demos for the ArtInChip eM3499 USB monitor."
+description = "Linux userspace driver for the MSI P13 USB display panel and image sender."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [{ name = "Alexander Romanoff" }]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Graphics :: Display",
+]
 dependencies = [
     "cryptography",
-    "hidapi",
     "Pillow",
     "pyusb",
-    "qrcode",
 ]
-keywords = ["artinchip", "em3499", "usb-display", "pyusb", "hidapi"]
+keywords = ["msi", "p13", "usb-display", "pyusb", "kde", "panel-monitor", "artinchip"]
 
 [project.urls]
-Repository = "https://github.com/xormal/eM3499-Monitor"
+Repository = "https://github.com/xormal/MSI-P13-Display"
 
 [tool.setuptools.packages.find]
 where = ["src"]
