@@ -12,12 +12,3 @@ dist/
 .cache/
 *.log
 *.tmp
-
-# Large vendor drops and local captures should stay outside the repository.
-vendor/
-driverfusionfreesetup/
-*.exe
-*.zip
-*.deb
-*.pkg
-*.so

@@ -1,2 +1,2 @@
-# ArtInChip USB Display / eM3499-Monitor userspace access.
+# MSI P13 USB display panel userspace access.
 SUBSYSTEM=="usb", ATTR{idVendor}=="33c3", ATTR{idProduct}=="0e02", MODE="0666", TAG+="uaccess"
