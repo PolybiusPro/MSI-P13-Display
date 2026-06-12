@@ -19,7 +19,7 @@ FPS           60
 ## Install
 
 ```bash
-git clone git@github.com:xormal/MSI-P13-Display.git
+git clone git@github.com:PolybiusPro/MSI-P13-Display.git
 cd MSI-P13-Display
 bash scripts/install.sh
 ```
