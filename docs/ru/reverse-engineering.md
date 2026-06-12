@@ -62,9 +62,3 @@ transport. Theme-протокол использует marker `AA551234` и seri
 quality=60, subsampling=2, chunk_size=4096
 ```
 
-## Touch Investigation
-
-Touch не является частью display bulk stream. Он находится на HID interface `3`.
-Контроллер может присылать stale pressed reports после drag, поэтому финальный
-reader использует небольшой logical state filter, а не доверяет сырым Tip Switch
-reports один-в-один.

@@ -1,5 +1,4 @@
 cryptography
-hidapi
 pillow
 pyusb
 qrcode

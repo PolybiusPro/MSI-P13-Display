@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install native USB/HID libraries and create a local Python environment.
+# Install native USB libraries and create a local Python environment.
 # Requires Homebrew. Run from the repository root.
 
-brew install libusb hidapi
+brew install libusb
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip

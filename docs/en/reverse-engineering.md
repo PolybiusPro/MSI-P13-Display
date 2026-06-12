@@ -63,9 +63,3 @@ The stable encoder settings were:
 quality=60, subsampling=2, chunk_size=4096
 ```
 
-## Touch Investigation
-
-Touch is not part of the display bulk stream. It is HID interface `3`.
-The controller can emit stale pressed reports after a drag, so the final reader
-uses a small logical state filter instead of trusting raw Tip Switch reports
-one-for-one.

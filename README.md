@@ -23,8 +23,7 @@ Russian documentation: [README.ru.md](README.ru.md)
 - Direct USB display transport over PyUSB.
 - RSA authentication handshake recovered from ArtInChip tooling.
 - JPEG frame sender with stable encoder defaults.
-- HID touch reader with stale-contact filtering.
-- Examples for drawing a circle, square, gradient, clock, and touch events.
+- Examples for drawing a circle, square, gradient, clock, and sending images.
 - Full English and Russian protocol documentation.
 - macOS and Linux setup scripts.
 - A higher-level information-screen application from the original investigation.
@@ -81,10 +80,10 @@ Run a clock:
 python examples/clock.py --duration 60 --fps 1
 ```
 
-Read touch events:
+Send an image or animation:
 
 ```bash
-python -m em3499_monitor.touch
+python examples/send_image.py photo.jpg
 ```
 
 Run the full information screen:
@@ -115,10 +114,6 @@ flowchart LR
     Header --> Bulk[USB bulk OUT interface 0]
     Bulk --> FW[eM3499 firmware]
     FW --> LCD[480x480 LCD]
-
-    Touch[HID touch interface 3] --> HID[hidapi reader]
-    HID --> Filter[logical touch filter]
-    Filter --> Host
 ```
 
 ## Frame Flow
@@ -146,7 +141,7 @@ sequenceDiagram
 ## Repository Layout
 
 ```text
-src/em3499_monitor/        importable driver and touch modules
+src/em3499_monitor/        importable display driver
 examples/                  small documented demos
 apps/                      working scripts from the investigation
 docs/en/                   English protocol documentation
@@ -160,7 +155,6 @@ scripts/                   macOS/Linux setup and udev rule
 - [English protocol guide](docs/en/protocol.md)
 - [Russian protocol guide](docs/ru/protocol.md)
 - [Reverse-engineering notes](docs/en/reverse-engineering.md)
-- [Touch protocol notes](docs/en/touch.md)
 
 ## Notes
 

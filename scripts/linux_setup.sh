@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install native USB/HID libraries and create a local Python environment.
+# Install native USB libraries and create a local Python environment.
 # Debian/Ubuntu/Raspberry Pi OS oriented. Run from the repository root.
 
 sudo apt-get update
-sudo apt-get install -y python3-venv python3-dev libusb-1.0-0-dev libhidapi-hidraw0 libhidapi-dev
+sudo apt-get install -y python3-venv python3-dev libusb-1.0-0-dev
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip

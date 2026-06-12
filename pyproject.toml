@@ -12,12 +12,11 @@ license = { file = "LICENSE" }
 authors = [{ name = "Alexander Romanoff" }]
 dependencies = [
     "cryptography",
-    "hidapi",
     "Pillow",
     "pyusb",
     "qrcode",
 ]
-keywords = ["artinchip", "em3499", "usb-display", "pyusb", "hidapi"]
+keywords = ["artinchip", "em3499", "usb-display", "pyusb"]
 
 [project.urls]
 Repository = "https://github.com/xormal/eM3499-Monitor"

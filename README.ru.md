@@ -23,8 +23,7 @@ Media format  JPEG, 0x10
 - Прямой USB transport дисплея через PyUSB.
 - RSA authentication handshake, восстановленный из ArtInChip tooling.
 - Отправка JPEG-кадров со стабильными encoder defaults.
-- HID touch reader с фильтром stale-contact событий.
-- Примеры для круга, квадрата, градиента, часов и touch events.
+- Примеры для круга, квадрата, градиента, часов и отправки изображений.
 - Полная документация протокола на английском и русском.
 - Setup-скрипты для macOS и Linux.
 - Высокоуровневый информационный экран из исходного исследования.
@@ -81,10 +80,10 @@ python examples/draw_shapes.py --mode gradient
 python examples/clock.py --duration 60 --fps 1
 ```
 
-Читать события тачскрина:
+Отправить изображение или анимацию:
 
 ```bash
-python -m em3499_monitor.touch
+python examples/send_image.py photo.jpg
 ```
 
 Запустить полный информационный экран:
@@ -116,10 +115,6 @@ flowchart LR
     Header --> Bulk[USB bulk OUT interface 0]
     Bulk --> FW[eM3499 firmware]
     FW --> LCD[480x480 LCD]
-
-    Touch[HID touch interface 3] --> HID[hidapi reader]
-    HID --> Filter[logical touch filter]
-    Filter --> Host
 ```
 
 ## Поток кадра
@@ -147,7 +142,7 @@ sequenceDiagram
 ## Структура
 
 ```text
-src/em3499_monitor/        импортируемый драйвер и touch-модуль
+src/em3499_monitor/        импортируемый display driver
 examples/                  маленькие документированные demo
 apps/                      рабочие скрипты из исследования
 docs/en/                   документация протокола на английском
@@ -161,7 +156,6 @@ scripts/                   setup для macOS/Linux и udev rule
 - [Английское описание протокола](docs/en/protocol.md)
 - [Русское описание протокола](docs/ru/protocol.md)
 - [Заметки по реверс-инжинирингу](docs/ru/reverse-engineering.md)
-- [Описание touch-протокола](docs/ru/touch.md)
 
 ## Примечания
 

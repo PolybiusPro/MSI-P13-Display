@@ -13,7 +13,7 @@ little-endian ArtInChip frame header. Before frames are accepted, the host must
 complete the two-step RSA challenge/response handshake implemented below.
 
 This module intentionally avoids any vendor binary library. It uses PyUSB for
-the vendor bulk display interface and hidapi for the optional touch interface.
+the vendor bulk display interface.
 """
 
 from __future__ import annotations
@@ -232,7 +232,7 @@ def print_platform_hints():
 
     if sys.platform == "darwin":
         print("macOS hint: install libusb with Homebrew and run from a venv.")
-        print("  brew install libusb hidapi")
+        print("  brew install libusb")
     elif sys.platform.startswith("linux"):
         print("Linux hint: add the udev rule from scripts/99-artinchip-usb-display.rules")
         print("or run the test once with sudo to confirm it is a permissions issue.")

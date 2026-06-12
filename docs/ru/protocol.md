@@ -11,7 +11,7 @@ Linux-драйвера ArtInChip, пакете Waveshare для Raspberry Pi и 
 - `src/em3499_monitor/display.py` - небольшой документированный userspace-драйвер.
 - `examples/draw_shapes.py` - рисование круга, квадрата и градиента.
 - `examples/clock.py` - постоянное обновление часов.
-- `examples/touch_events.py` - чтение HID-тачскрина.
+- `examples/send_image.py` - отправка still-изображений, GIF и animated WebP.
 
 ## Проверенное устройство
 
@@ -27,9 +27,7 @@ Media format  0x10, JPEG
 Reported FPS  60
 ```
 
-Дисплей и тачскрин являются разными USB-интерфейсами одного устройства. Кадры
-для дисплея отправляются через vendor bulk interface. Тачскрин читается как HID
-digitizer.
+Кадры для дисплея отправляются через vendor bulk interface на USB interface `0`.
 
 ## Установка
 
@@ -47,15 +45,11 @@ python examples/draw_shapes.py --mode all
 То же вручную:
 
 ```bash
-brew install libusb hidapi
+brew install libusb
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
 ```
-
-На macOS HID-интерфейс тачскрина обычно остается под системным HID-стеком.
-События тача нужно читать через `hidapi`; не нужно пытаться забирать HID
-interface через PyUSB.
 
 ### Linux
 
@@ -117,10 +111,11 @@ bash scripts/linux_run_shapes.sh --frames 5
 python examples/clock.py --duration 60 --fps 1
 ```
 
-Читать события тачскрина:
+Отправить изображение или анимацию:
 
 ```bash
-python examples/touch_events.py
+python examples/send_image.py photo.jpg
+python examples/send_image.py animation.gif
 ```
 
 ## Стабильные настройки кодирования
@@ -325,58 +320,6 @@ display.send_image(img, frame_id=2, quality=60, subsampling=2)
 
 Готовая версия для запуска: `examples/draw_shapes.py`.
 
-## Touch Interface
-
-Тачскрин виден как HID interface `3`. Наблюдавшиеся форматы report:
-
-```text
-Report 0x01:
-    byte 0       report id, 0x01
-    byte 1       status flags
-    byte 2       contact id
-    bytes 3..4   x_raw, little endian
-    bytes 5..6   y_raw, little endian
-    last byte    contact count
-
-Report 0x54:
-    byte 0       report id, 0x54
-    byte 2       status flags
-    byte 3       contact id
-    bytes 4..5   x_raw, little endian
-    bytes 6..7   y_raw, little endian
-    last byte    contact count
-```
-
-Status flags:
-
-```text
-bit 0  Tip Switch
-bit 1  In Range
-```
-
-Условие активного касания в рабочем коде:
-
-```python
-pressed = bool(status & 0x01) and contact_count > 0
-```
-
-Raw-координаты масштабируются из `0..4095` в текущий размер дисплея:
-
-```python
-x = round(x_raw * (width - 1) / 4095)
-y = round(y_raw * (height - 1) / 4095)
-```
-
-Во время тестов capacitive controller иногда продолжал присылать повторяющиеся
-pressed reports с неизменными координатами после отпускания пальца, особенно
-после drag. Пример `touch_events.py` содержит небольшой state filter:
-
-- `down` генерируется на первом pressed report.
-- `move` генерируется при изменении координат.
-- `up reason=up` генерируется на настоящем inactive report.
-- `up reason=stale` генерируется после повторяющихся pressed reports без движения.
-- `up reason=gap` генерируется после серии пустых reads, когда логически палец был нажат.
-
 ## Описание реверс-инжиниринга
 
 Первого пакета Waveshare для Raspberry Pi было недостаточно для прямого
@@ -429,9 +372,3 @@ Permission denied на Linux:
 - Используйте `--quality 60 --subsampling 2 --chunk-size 4096`.
 - Сначала пробуйте один кадр.
 - Если прошивка перестала принимать кадры, перезагрузите или переподключите дисплей.
-
-Тачскрин не открывается:
-
-- Установите нативные библиотеки `hidapi`.
-- На Linux проверьте права на `/dev/hidraw*`.
-- На macOS читайте через `hidapi`, а не через claiming HID interface в PyUSB.

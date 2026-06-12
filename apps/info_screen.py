@@ -9,7 +9,6 @@ import hashlib
 import io
 import json
 import os
-import queue
 import select
 import subprocess
 import threading
@@ -28,11 +27,6 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 import qrcode
 
 import aic_time
-
-try:
-    import aic_touch
-except Exception:
-    aic_touch = None
 
 
 GDELT_DOC_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
@@ -113,15 +107,6 @@ class NewsLayout:
     viewport_h: int
     card_h: int
     slot_h: int
-
-
-@dataclass(frozen=True)
-class TouchAction:
-    kind: str
-    x: int
-    y: int
-    dx: int = 0
-    dy: int = 0
 
 
 def loading_article() -> Article:
@@ -222,39 +207,11 @@ def news_layout(width: int, height: int, visible_count: int) -> NewsLayout:
     return NewsLayout(top, footer_h, gap, card_w, viewport_h, card_h, slot_h)
 
 
-def hit_news_card(x: int, y: int, width: int, height: int, visible_count: int) -> int | None:
-    layout = news_layout(width, height, visible_count)
-    if x < 8 or x >= width - 8:
-        return None
-    local_y = y - layout.top
-    if local_y < 0 or local_y >= layout.viewport_h:
-        return None
-    slot = local_y // layout.slot_h
-    if slot < 0 or slot >= visible_count:
-        return None
-    if local_y - slot * layout.slot_h >= layout.card_h:
-        return None
-    return slot
-
-
 def button_rects(width: int, height: int) -> dict[str, tuple[int, int, int, int]]:
     return {
         "back": (14, 10, 132, 48),
         "qr": (width - 88, 10, width - 14, 48),
     }
-
-
-def hit_button(x: int, y: int, rects: dict[str, tuple[int, int, int, int]]) -> str:
-    for name, (left, top, right, bottom) in rects.items():
-        if left <= x <= right and top <= y <= bottom:
-            return name
-    return ""
-
-
-def scroll_index(start: int, delta: int, article_count: int) -> int:
-    if article_count <= 0:
-        return 0
-    return (start + delta) % article_count
 
 
 def article_signature(articles: list[Article]) -> tuple[tuple[str, str], ...]:
@@ -1419,119 +1376,6 @@ def render_qr(article: Article, width: int, height: int) -> Image.Image:
     return img.convert("RGB")
 
 
-def touch_worker(
-    actions: queue.Queue[TouchAction],
-    width: int,
-    height: int,
-    cfg: configparser.ConfigParser,
-    verbose: bool,
-    stop_event: threading.Event,
-):
-    if aic_touch is None:
-        if verbose:
-            print("touch disabled: aic_touch import failed")
-        return
-
-    tap_max = cfg_int(cfg, "touch", "tap_max_pixels", 28)
-    double_seconds = cfg_float(cfg, "touch", "double_tap_seconds", 0.35)
-    drag_step = max(1, cfg_int(cfg, "touch", "drag_pixels_per_step", 52))
-    stale_after_drag_reports = cfg_int(cfg, "touch", "stale_after_drag_reports", 3)
-    stale_after_tap_reports = cfg_int(cfg, "touch", "stale_after_tap_reports", 3)
-    stale_still_pixels = cfg_int(cfg, "touch", "stale_still_pixels", 1)
-    no_report_release_polls = cfg_int(cfg, "touch", "no_report_release_polls", 8)
-    try:
-        reader = aic_touch.TouchReader(
-            width,
-            height,
-            tap_max_pixels=tap_max,
-            stale_after_drag_reports=stale_after_drag_reports,
-            stale_after_tap_reports=stale_after_tap_reports,
-            still_pixels=stale_still_pixels,
-            no_report_release_polls=no_report_release_polls,
-        )
-    except Exception as exc:
-        if verbose:
-            print(f"touch disabled: {exc}")
-        return
-
-    down_event = None
-    last_pressed_event = None
-    drag_anchor = None
-    drag_started = False
-    last_event = None
-    pending_tap: tuple[float, int, int] | None = None
-
-    def finish_touch(ended_at: float):
-        nonlocal down_event, last_pressed_event, drag_anchor, drag_started, pending_tap, last_event
-        if not down_event:
-            return
-        down_time, down_x, down_y = down_event
-        _, up_x, up_y = last_pressed_event or (ended_at, down_x, down_y)
-        dx = up_x - down_x
-        dy = up_y - down_y
-        moved = max(abs(dx), abs(dy))
-        if not drag_started and moved <= tap_max and ended_at - down_time <= 0.65:
-            if pending_tap and ended_at - pending_tap[0] <= double_seconds:
-                actions.put(TouchAction("double_tap", up_x, up_y))
-                pending_tap = None
-            else:
-                pending_tap = (ended_at, up_x, up_y)
-        down_event = None
-        last_pressed_event = None
-        drag_anchor = None
-        drag_started = False
-        last_event = None
-
-    try:
-        while not stop_event.is_set():
-            now = time.monotonic()
-            if pending_tap and now - pending_tap[0] > double_seconds:
-                _, tap_x, tap_y = pending_tap
-                actions.put(TouchAction("tap", tap_x, tap_y))
-                pending_tap = None
-
-            try:
-                event = reader.read(timeout_ms=40)
-            except Exception as exc:
-                if verbose and not stop_event.is_set():
-                    print(f"touch read failed: {exc}")
-                break
-            if event is None:
-                time.sleep(0.01)
-                continue
-            if last_event and event.pressed == last_event.pressed and event.x == last_event.x and event.y == last_event.y:
-                continue
-
-            if event.pressed and (last_event is None or not last_event.pressed):
-                down_event = (now, event.x, event.y)
-                last_pressed_event = (now, event.x, event.y)
-                drag_anchor = (event.x, event.y)
-                drag_started = False
-            elif event.pressed:
-                last_pressed_event = (now, event.x, event.y)
-                if down_event and drag_anchor:
-                    _, down_x, down_y = down_event
-                    moved_total = max(abs(event.x - down_x), abs(event.y - down_y))
-                    if moved_total > tap_max:
-                        drag_started = True
-                        pending_tap = None
-                    if drag_started:
-                        anchor_x, anchor_y = drag_anchor
-                        dx = event.x - anchor_x
-                        dy = event.y - anchor_y
-                        if max(abs(dx), abs(dy)) >= drag_step:
-                            actions.put(TouchAction("drag", event.x, event.y, dx, dy))
-                            drag_anchor = (event.x, event.y)
-            elif not event.pressed and last_event and last_event.pressed and down_event:
-                finish_touch(now)
-            last_event = event
-    finally:
-        try:
-            reader.close()
-        except Exception:
-            pass
-
-
 def image_to_jpeg(img: Image.Image, quality: int, subsampling: int) -> bytes:
     out = io.BytesIO()
     img.save(out, format="JPEG", quality=quality, subsampling=subsampling, progressive=False)
@@ -1574,9 +1418,6 @@ def run(config_path: str, once: bool):
     idle_frame_interval = max(0.2, cfg_float(cfg, "display", "idle_frame_interval_seconds", cfg_float(cfg, "display", "frame_interval_seconds", 1.0)))
     active_frame_interval = max(1 / 60, cfg_float(cfg, "display", "active_frame_interval_seconds", 1 / 30))
     refresh_seconds = max(60.0, cfg_float(cfg, "display", "refresh_minutes", 30) * 60)
-    touch_enabled = cfg_bool(cfg, "touch", "enabled", True)
-    drag_pixels_per_step = max(1, cfg_int(cfg, "touch", "drag_pixels_per_step", 52))
-    back_debounce_seconds = max(0.0, cfg_float(cfg, "touch", "back_debounce_seconds", 0.35))
 
     dev, ep_out, ep_in = aic_time.open_device(aic_time.VID, aic_time.PID)
     params = aic_time.get_params(dev)
@@ -1586,22 +1427,13 @@ def run(config_path: str, once: bool):
 
     state = NewsState()
     stop_event = threading.Event()
-    touch_actions: queue.Queue[TouchAction] = queue.Queue()
     worker = threading.Thread(
         target=refresh_worker,
         args=(cfg, state, refresh_seconds, verbose, stop_event),
         daemon=True,
     )
-    touch_thread: threading.Thread | None = None
     if not once:
         worker.start()
-        if touch_enabled:
-            touch_thread = threading.Thread(
-                target=touch_worker,
-                args=(touch_actions, params.width, params.height, cfg, verbose, stop_event),
-                daemon=True,
-            )
-            touch_thread.start()
 
     frame_id = 0
     view_start = 0
@@ -1614,7 +1446,6 @@ def run(config_path: str, once: bool):
     selected_index = 0
     detail_scroll = 0
     fast_until = time.monotonic()
-    suppress_card_taps_until = 0.0
 
     try:
         while True:
@@ -1654,83 +1485,6 @@ def run(config_path: str, once: bool):
                 selected_index = 0
                 detail_scroll = 0
 
-            while True:
-                try:
-                    action = touch_actions.get_nowait()
-                except queue.Empty:
-                    break
-
-                if action.kind == "double_tap":
-                    if mode != "list":
-                        mode = "list"
-                    else:
-                        previous_view_start = view_start
-                        view_start = scroll_index(view_start, 1, len(articles))
-                    slide_started = now
-                    transition_started = now if previous_view_start != view_start else now - animation_seconds
-                    fast_until = now + 0.8
-                    if verbose:
-                        print(f"touch double_tap: mode={mode}, start={view_start + 1}")
-                    continue
-
-                if action.kind == "drag":
-                    steps = max(1, round(abs(action.dy) / drag_pixels_per_step))
-                    if abs(action.dy) >= abs(action.dx):
-                        delta = steps if action.dy < 0 else -steps
-                    else:
-                        delta = steps if action.dx < 0 else -steps
-                    if mode == "list":
-                        view_start = scroll_index(view_start, delta, len(articles))
-                        previous_view_start = view_start
-                    elif mode == "detail":
-                        max_detail_scroll = detail_max_scroll(articles[selected_index], params.width, params.height)
-                        detail_scroll = max(0, min(max_detail_scroll, detail_scroll - action.dy))
-                    if mode == "qr":
-                        mode = "list"
-                        detail_scroll = 0
-                    slide_started = now
-                    transition_started = now - animation_seconds
-                    fast_until = now + 0.8
-                    if verbose:
-                        print(f"touch drag: delta={delta}, mode={mode}, start={view_start + 1}, selected={selected_index + 1}")
-                    continue
-
-                if action.kind != "tap":
-                    continue
-
-                if mode == "list":
-                    if now < suppress_card_taps_until:
-                        if verbose:
-                            print("touch tap: suppressed after back")
-                        continue
-                    slot = hit_news_card(action.x, action.y, params.width, params.height, visible_count)
-                    if slot is not None:
-                        selected_index = (view_start + slot) % len(articles)
-                        detail_scroll = 0
-                        mode = "detail"
-                        fast_until = now + 0.8
-                        if verbose:
-                            print(f"touch tap: open detail {selected_index + 1}/{len(articles)}")
-                elif mode == "detail":
-                    button = hit_button(action.x, action.y, button_rects(params.width, params.height))
-                    if button == "back":
-                        mode = "list"
-                        detail_scroll = 0
-                        suppress_card_taps_until = now + back_debounce_seconds
-                        fast_until = now + 0.8
-                    elif button == "qr":
-                        mode = "qr"
-                        fast_until = now + 0.8
-                    if verbose and button:
-                        print(f"touch tap: button={button}, mode={mode}")
-                elif mode == "qr":
-                    button = hit_button(action.x, action.y, button_rects(params.width, params.height))
-                    if button == "back":
-                        mode = "detail"
-                        fast_until = now + 0.8
-                    if verbose and button:
-                        print(f"touch tap: button={button}, mode={mode}")
-
             if animation_seconds > 0:
                 transition_progress = min(1.0, (now - transition_started) / animation_seconds)
             else:
@@ -1769,8 +1523,6 @@ def run(config_path: str, once: bool):
             print("stopped")
     finally:
         stop_event.set()
-        if touch_thread is not None:
-            touch_thread.join(timeout=1)
 
 
 def main() -> int:

@@ -11,7 +11,7 @@ The same package also contains working Python examples:
 - `src/em3499_monitor/display.py` - a small documented userspace display driver.
 - `examples/draw_shapes.py` - draw a circle, a square, and a gradient.
 - `examples/clock.py` - continuously update a clock.
-- `examples/touch_events.py` - read the touch panel HID interface.
+- `examples/send_image.py` - send still images, GIFs, and animated WebP files.
 
 ## Tested Device
 
@@ -27,9 +27,7 @@ Media format  0x10, JPEG
 Reported FPS  60
 ```
 
-The display and touch panel are separate USB interfaces under the same VID/PID.
-The display image stream is a vendor bulk interface. The touch panel is a HID
-digitizer.
+The display image stream is a vendor bulk interface on USB interface `0`.
 
 ## Installation
 
@@ -47,14 +45,11 @@ python examples/draw_shapes.py --mode all
 Manual equivalent:
 
 ```bash
-brew install libusb hidapi
+brew install libusb
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
 ```
-
-macOS usually keeps the HID touch interface under the system HID stack. Read
-touch events with `hidapi`; do not claim the HID interface with PyUSB.
 
 ### Linux
 
@@ -115,10 +110,11 @@ Run a clock:
 python examples/clock.py --duration 60 --fps 1
 ```
 
-Read touch events:
+Send an image or animation:
 
 ```bash
-python examples/touch_events.py
+python examples/send_image.py photo.jpg
+python examples/send_image.py animation.gif
 ```
 
 ## Stable Encoder Settings
@@ -321,58 +317,6 @@ display.send_image(img, frame_id=2, quality=60, subsampling=2)
 
 The ready-to-run version is `examples/draw_shapes.py`.
 
-## Touch Interface
-
-The touch panel appears as HID interface `3`. Observed report layouts:
-
-```text
-Report 0x01:
-    byte 0       report id, 0x01
-    byte 1       status flags
-    byte 2       contact id
-    bytes 3..4   x_raw, little endian
-    bytes 5..6   y_raw, little endian
-    last byte    contact count
-
-Report 0x54:
-    byte 0       report id, 0x54
-    byte 2       status flags
-    byte 3       contact id
-    bytes 4..5   x_raw, little endian
-    bytes 6..7   y_raw, little endian
-    last byte    contact count
-```
-
-Status flags:
-
-```text
-bit 0  Tip Switch
-bit 1  In Range
-```
-
-The active-contact condition used by the working code is:
-
-```python
-pressed = bool(status & 0x01) and contact_count > 0
-```
-
-Raw coordinates are scaled from `0..4095` to the current display size:
-
-```python
-x = round(x_raw * (width - 1) / 4095)
-y = round(y_raw * (height - 1) / 4095)
-```
-
-During testing, the capacitive controller could keep sending repeated pressed
-reports with unchanged coordinates after the finger was released, especially
-after a drag. The example `touch_events.py` includes a small state filter:
-
-- `down` is emitted on the first pressed report.
-- `move` is emitted when coordinates change.
-- `up reason=up` is emitted on a real inactive report.
-- `up reason=stale` is emitted after repeated no-motion pressed reports.
-- `up reason=gap` is emitted after repeated empty reads while logically down.
-
 ## Reverse-Engineering Notes
 
 The first Waveshare Raspberry Pi package was not enough for direct control on
@@ -424,9 +368,3 @@ Display authenticates but does not update:
 - Use `--quality 60 --subsampling 2 --chunk-size 4096`.
 - Try a single frame first.
 - Reboot or replug the display if the firmware stopped accepting frames.
-
-Touch does not open:
-
-- Install `hidapi` native libraries.
-- On Linux, verify `/dev/hidraw*` permissions.
-- On macOS, read through `hidapi`, not PyUSB interface claiming.
