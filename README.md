@@ -14,32 +14,18 @@ FPS           60
 ## Requirements
 
 - Linux with libusb
-- `send_image.py` — any desktop session
-- `panel_monitor.py` — KDE Plasma Wayland, `krfb`, and system `python3-dbus`
+- KDE Plasma Wayland for the panel monitor (`krfb`, `python3-dbus`)
 
-## Quick Start
+## Install
 
 ```bash
 git clone git@github.com:xormal/MSI-P13-Display.git
 cd MSI-P13-Display
-bash scripts/linux_setup.sh
-source .venv/bin/activate
-sudo cp scripts/99-msi-p13-display.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules && sudo udevadm trigger
-python examples/send_image.py photo.jpg
+bash scripts/install.sh
 ```
 
-## Display driver at login
-
-Install as a systemd user service (starts at graphical login):
-
-```bash
-sudo dnf install krfb python3-dbus python3-gobject   # Fedora
-./scripts/install-panel-monitor.sh
-```
-
-The USB panel appears as `Virtual-MSI-P13` in Display Settings. Drag windows
-onto it; frames stream to the panel at up to 60 FPS.
+This installs system packages, a Python venv, the udev rule, and a systemd user
+service that starts the panel monitor at graphical login.
 
 ```bash
 systemctl --user status msi-p13-panel-monitor.service
@@ -47,23 +33,28 @@ journalctl --user -u msi-p13-panel-monitor.service -f
 tail -f ~/.local/state/msi-p13-display/panel-monitor.log
 ```
 
-Remove:
+Remove the service:
 
 ```bash
-./scripts/install-panel-monitor.sh --remove
+bash scripts/install.sh --remove
 ```
 
-Manual run:
+## Usage
+
+The USB panel appears as `Virtual-MSI-P13` in Display Settings.
+
+Send a still image or animation:
+
+```bash
+source .venv/bin/activate
+python examples/send_image.py photo.jpg
+python examples/send_image.py animation.gif
+```
+
+Run the panel monitor manually:
 
 ```bash
 python examples/panel_monitor.py --shell
-```
-
-## Send images
-
-```bash
-python examples/send_image.py photo.jpg
-python examples/send_image.py animation.gif
 ```
 
 ## Stable Frame Settings
@@ -80,7 +71,7 @@ USB chunk size     4096
 src/msi_p13_display/  display driver, capture, streaming
 examples/             panel_monitor.py, send_image.py
 docs/en/              protocol guide
-scripts/              setup, udev rule, systemd installer
+scripts/              install.sh, udev rule, driver wrapper
 ```
 
 ## Documentation

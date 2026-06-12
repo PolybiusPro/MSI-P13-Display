@@ -24,24 +24,13 @@ Interface     0, bulk IN/OUT
 
 ```bash
 cd MSI-P13-Display
-bash scripts/linux_setup.sh
+bash scripts/install.sh
 source .venv/bin/activate
-sudo cp scripts/99-msi-p13-display.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
-Unplug and replug the display after installing the udev rule.
-
-### Panel monitor (KDE Plasma Wayland)
-
-```bash
-sudo dnf install krfb python3-dbus python3-gobject   # Fedora example
-./scripts/install-panel-monitor.sh
-```
-
-This installs a systemd user service that starts at graphical login. The venv
-from `linux_setup.sh` uses `--system-site-packages` so KWin ScreenShot2 can
-use system `python3-dbus`.
+`install.sh` installs system packages, the Python venv (with `--system-site-packages`
+for KWin ScreenShot2), the udev rule, and the systemd user service. Unplug and
+replug the display after install.
 
 ```bash
 systemctl --user status msi-p13-panel-monitor.service

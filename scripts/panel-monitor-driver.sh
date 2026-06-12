@@ -10,7 +10,7 @@ MAX_WAIT_SECONDS=180
 mkdir -p "${STATE_DIR}"
 
 if [[ ! -f "${CONFIG_FILE}" ]]; then
-    echo "missing ${CONFIG_FILE}; run ./scripts/install-panel-monitor.sh" >&2
+    echo "missing ${CONFIG_FILE}; run ./scripts/install.sh" >&2
     exit 1
 fi
 

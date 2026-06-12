@@ -199,8 +199,8 @@ def kwin_capture_setup_hint() -> str:
 
     return (
         "KWin screen capture may be blocked for this process. "
-        "Install the systemd user service with ./scripts/install-panel-monitor.sh "
-        "and check journalctl --user -u msi-p13-panel-monitor.service if capture fails."
+        "Install with ./scripts/install.sh and check "
+        "journalctl --user -u msi-p13-panel-monitor.service if capture fails."
     )
 
 
