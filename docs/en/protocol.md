@@ -7,6 +7,8 @@ Linux userspace guide for the MSI P13 USB display panel.
 | Path | Purpose |
 | --- | --- |
 | `src/msi_p13_display/display.py` | USB driver and JPEG transport |
+| `src/msi_p13_display/drm_io.py` | vkms load, kscreen output setup |
+| `src/msi_p13_display/capture.py` | vkms DRM framebuffer capture |
 | `examples/send_image.py` | Still images, GIF, animated WebP |
 | `examples/panel_monitor.py` | KDE compositor monitor streaming |
 
@@ -25,12 +27,11 @@ Interface     0, bulk IN/OUT
 ```bash
 cd MSI-P13-Display
 bash scripts/install.sh
-source .venv/bin/activate
 ```
 
-`install.sh` installs system packages, the Python venv (with `--system-site-packages`
-for KWin ScreenShot2), the udev rule, and the systemd user service. Unplug and
-replug the display after install.
+`install.sh` installs native system packages (`python3-pillow`, `python3-cryptography`,
+`python3-pyusb`, `libdrm`, `kernel-modules-extra` for vkms), loads the vkms DRM module,
+the udev rule, and the systemd user service. Unplug and replug the display after install.
 
 ```bash
 systemctl --user status msi-p13-panel-monitor.service
@@ -40,14 +41,14 @@ journalctl --user -u msi-p13-panel-monitor.service -f
 ## Usage
 
 ```bash
-python examples/send_image.py photo.jpg
-python examples/send_image.py animation.gif
-python examples/panel_monitor.py --shell
+python3 examples/send_image.py photo.jpg
+python3 examples/send_image.py animation.gif
+python3 examples/panel_monitor.py --shell
 ```
 
-`panel_monitor.py` creates a compositor output such as `Virtual-MSI-P13` in
-Display Settings, captures it through KWin (or Spectacle as fallback), and
-streams frames to the USB panel.
+`panel_monitor.py` loads the vkms DRM module, enables a virtual output in Display
+Settings (for example `Virtual-1`), captures the vkms DRM framebuffer, and streams frames
+to the USB panel.
 
 ## Encoder Defaults
 
@@ -144,5 +145,6 @@ display.close()
 | Device not found | Check cable; confirm `33c3:0e02` in `lsusb` |
 | Permission denied | Install udev rule; unplug/replug; try once with `sudo` |
 | Auth OK, no image | Use `--quality 60 --subsampling 2 --chunk-size 4096` |
-| KWin `NoAuthorized` | KWin may fall back to Spectacle; check the service log |
+| DRM capture fails | Confirm Virtual-1 is enabled; try `sudo bash scripts/reset-vkms-modes.sh` |
+| Stale Virtual-1 modes | `sudo bash scripts/reset-vkms-modes.sh` |
 | Driver not starting at login | `systemctl --user status msi-p13-panel-monitor.service` |

@@ -14,7 +14,11 @@ FPS           60
 ## Requirements
 
 - Linux with libusb
-- KDE Plasma Wayland for the panel monitor (`krfb`, `python3-dbus`)
+- KDE Plasma Wayland for the panel monitor
+- `vkms` DRM module (`kernel-modules-extra` on Fedora)
+- Native packages: `python3-pillow`, `python3-cryptography`, `python3-pyusb`, `libdrm`, `kscreen`
+
+The panel monitor uses the in-kernel **vkms** virtual display. Under Plasma Wayland, frames are captured via KWin ScreenShot2 because the vkms DRM framebuffer is not directly readable.
 
 ## Install
 
@@ -24,8 +28,7 @@ cd MSI-P13-Display
 bash scripts/install.sh
 ```
 
-This installs system packages, a Python venv, the udev rule, and a systemd user
-service that starts the panel monitor at graphical login.
+This installs native system packages, loads `vkms`, the udev rule, and a systemd user service that starts the panel monitor at graphical login.
 
 ```bash
 systemctl --user status msi-p13-panel-monitor.service
@@ -41,20 +44,25 @@ bash scripts/install.sh --remove
 
 ## Usage
 
-The USB panel appears as `Virtual-MSI-P13` in Display Settings.
+The USB panel gets a vkms DRM output (for example `Virtual-1`) in Display Settings.
 
 Send a still image or animation:
 
 ```bash
-source .venv/bin/activate
-python examples/send_image.py photo.jpg
-python examples/send_image.py animation.gif
+python3 examples/send_image.py photo.jpg
+python3 examples/send_image.py animation.gif
 ```
 
 Run the panel monitor manually:
 
 ```bash
-python examples/panel_monitor.py --shell
+python3 examples/panel_monitor.py --shell
+```
+
+If Virtual-1 has stale resolutions from earlier runs:
+
+```bash
+sudo bash scripts/reset-vkms-modes.sh
 ```
 
 ## Stable Frame Settings
@@ -68,7 +76,7 @@ USB chunk size     4096
 ## Layout
 
 ```text
-src/msi_p13_display/  display driver, capture, streaming
+src/msi_p13_display/  display driver, vkms setup, DRM capture, streaming
 examples/             panel_monitor.py, send_image.py
 docs/en/              protocol guide
 scripts/              install.sh, udev rule, driver wrapper

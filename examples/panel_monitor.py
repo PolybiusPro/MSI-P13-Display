@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Expose the USB panel as its own monitor in the desktop compositor.
 
-On KDE Plasma Wayland this registers a new output (for example ``Virtual-MSI-P13``)
-in Display Settings. Drag windows onto that monitor; this script captures it
-with the same APIs as other monitors and streams the frames to the USB panel.
+On KDE Plasma Wayland this registers a vkms DRM output (for example ``Virtual-1``)
+in Display Settings. Drag windows onto that monitor; this script reads the vkms
+DRM framebuffer and streams the frames to the USB panel.
 
 Examples:
 
     python examples/panel_monitor.py
     python examples/panel_monitor.py --shell
-    python examples/panel_monitor.py --name Panel --shell konsole
+    python examples/panel_monitor.py --shell konsole
 """
 
 from __future__ import annotations
@@ -18,9 +18,8 @@ import argparse
 import sys
 import time
 
-from msi_p13_display.capture import kwin_capture_authorized, kwin_capture_setup_hint, resolve_capture_backend
 from msi_p13_display.compositor_monitor import CompositorMonitor, default_shell
-import usb.core
+from usb.core import USBError
 
 from msi_p13_display.display import (
     MsiP13Display,
@@ -46,7 +45,7 @@ def open_usb_display(usb: MsiP13Display, *, retry_seconds: float, quiet: bool):
     while True:
         try:
             return usb.open()
-        except (RuntimeError, usb.core.USBError) as exc:
+        except (RuntimeError, USBError) as exc:
             if retry_seconds <= 0 or not is_device_gone_error(exc):
                 raise
             log(f"waiting for USB display ({exc}); retrying in {retry_seconds:.0f}s", quiet=quiet)
@@ -57,11 +56,6 @@ def open_usb_display(usb: MsiP13Display, *, retry_seconds: float, quiet: bool):
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Add a compositor monitor for the USB panel and stream it over USB.",
-    )
-    parser.add_argument(
-        "--name",
-        default="MSI-P13",
-        help="monitor name in Display Settings (output becomes Virtual-NAME, default: MSI-P13)",
     )
     parser.add_argument(
         "--shell",
@@ -87,12 +81,6 @@ def main() -> int:
         type=parse_color,
         default=(8, 11, 18),
         help="letterbox color for contain/center modes",
-    )
-    parser.add_argument(
-        "--capture-backend",
-        default="auto",
-        choices=("auto", "kwin", "spectacle"),
-        help="desktop capture backend (default: auto, prefers kwin on KDE)",
     )
     parser.add_argument(
         "--no-pipeline",
@@ -124,26 +112,17 @@ def main() -> int:
     usb = MsiP13Display(args.vid, args.pid, args.chunk_size)
 
     try:
-        capture_backend = resolve_capture_backend(args.capture_backend)
         params = open_usb_display(usb, retry_seconds=args.retry_seconds, quiet=quiet)
         target_fps = args.fps if args.fps is not None else float(params.fps or 60)
         target_fps = min(target_fps, float(params.fps or 60))
 
-        with CompositorMonitor(
-            params.width,
-            params.height,
-            name=args.name,
-            capture_backend=args.capture_backend,
-        ) as monitor:
+        with CompositorMonitor(params.width, params.height) as monitor:
             output_name = monitor.output_name
             log(
                 f"compositor monitor ready ({output_name}, {params.width}x{params.height})",
                 quiet=quiet,
             )
             log("it appears in Display Settings; drag windows onto it.", quiet=quiet)
-            log(f"capture backend: {capture_backend}", quiet=quiet)
-            if capture_backend == "kwin" and not kwin_capture_authorized():
-                log(f"note: {kwin_capture_setup_hint()}", quiet=quiet)
 
             if args.shell is not None:
                 command = default_shell() if args.shell == "auto" else args.shell

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Startup wrapper: wait for session, then run panel_monitor.py with logging.
+# Startup wrapper: wait for Plasma/Wayland, then run panel_monitor.py with logging.
 set -euo pipefail
 
 STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/msi-p13-display"
 CONFIG_FILE="${STATE_DIR}/install.conf"
 LOG_FILE="${STATE_DIR}/panel-monitor.log"
-MAX_WAIT_SECONDS=180
+MAX_WAIT_SECONDS=300
 
 mkdir -p "${STATE_DIR}"
 
@@ -17,11 +17,38 @@ fi
 # shellcheck source=/dev/null
 source "${CONFIG_FILE}"
 
+export REPO_ROOT="${REPO_ROOT:-}"
+export PYTHON="${PYTHON:-/usr/bin/python3}"
+export PYTHONPATH="${PYTHONPATH:-}"
+export SCRIPT="${SCRIPT:-}"
+
+if [[ -z "${PYTHONPATH}" || -z "${SCRIPT}" ]]; then
+    echo "install.conf is incomplete; run ./scripts/install.sh" >&2
+    exit 1
+fi
+
 exec >>"${LOG_FILE}" 2>&1
 echo "=== $(date -Is) panel monitor driver starting (pid $$) ==="
 echo "WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}"
 echo "XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-}"
 echo "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-}"
+echo "XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-}"
+echo "PYTHON=${PYTHON}"
+echo "SCRIPT=${SCRIPT}"
+echo "PYTHONPATH=${PYTHONPATH}"
+
+ensure_session_bus() {
+    if [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+        return 0
+    fi
+    if [[ -n "${XDG_RUNTIME_DIR:-}" && -S "${XDG_RUNTIME_DIR}/bus" ]]; then
+        DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+        export DBUS_SESSION_BUS_ADDRESS
+        echo "detected DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}"
+        return 0
+    fi
+    return 1
+}
 
 wait_for_repo() {
     local waited=0
@@ -61,15 +88,47 @@ wait_for_wayland() {
     done
 }
 
-wait_for_kwin() {
+wait_for_session_bus() {
     local waited=0
-    while ! gdbus introspect --session --dest org.kde.KWin \
-        --object-path /org/kde/KWin/ScreenShot2 >/dev/null 2>&1; do
+    while ! ensure_session_bus; do
         if (( waited >= MAX_WAIT_SECONDS )); then
-            echo "timed out waiting for KWin ScreenShot2"
+            echo "timed out waiting for session D-Bus"
             return 1
         fi
-        echo "waiting for KWin ScreenShot2 (${waited}s)"
+        echo "waiting for session D-Bus (${waited}s)"
+        sleep 2
+        waited=$((waited + 2))
+    done
+}
+
+wait_for_vkms() {
+    local waited=0
+    while true; do
+        if compgen -G "/sys/class/drm/card[0-9]-Virtual-*" >/dev/null; then
+            return 0
+        fi
+        if modprobe vkms 2>/dev/null; then
+            sleep 1
+            continue
+        fi
+        if (( waited >= MAX_WAIT_SECONDS )); then
+            echo "timed out waiting for vkms DRM module"
+            return 1
+        fi
+        echo "waiting for vkms DRM module (${waited}s)"
+        sleep 2
+        waited=$((waited + 2))
+    done
+}
+
+wait_for_kscreen() {
+    local waited=0
+    while ! kscreen-doctor -j >/dev/null 2>&1; do
+        if (( waited >= MAX_WAIT_SECONDS )); then
+            echo "timed out waiting for kscreen-doctor"
+            return 1
+        fi
+        echo "waiting for kscreen-doctor (${waited}s)"
         sleep 2
         waited=$((waited + 2))
     done
@@ -77,7 +136,9 @@ wait_for_kwin() {
 
 wait_for_repo
 wait_for_wayland
-wait_for_kwin
+wait_for_session_bus
+wait_for_vkms
+wait_for_kscreen
 
 echo "launching: ${PYTHON} ${SCRIPT} ${DRIVER_ARGS}"
 while true; do
