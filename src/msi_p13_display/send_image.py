@@ -5,11 +5,11 @@ Supports still images (JPEG, PNG, WebP, ...) and animated GIF / WebP files.
 
 Examples:
 
-    python examples/send_image.py photo.jpg
-    python examples/send_image.py wallpaper.png --fit contain --background 0,0,0
-    python examples/send_image.py animation.gif
-    python examples/send_image.py animation.webp --anim-loops 0 --anim-speed 1.5
-    python examples/send_image.py album/*.jpg --interval 5
+    PYTHONPATH=src python3 -m msi_p13_display.send_image photo.jpg
+    PYTHONPATH=src python3 -m msi_p13_display.send_image wallpaper.png --fit contain --background 0,0,0
+    PYTHONPATH=src python3 -m msi_p13_display.send_image animation.gif
+    PYTHONPATH=src python3 -m msi_p13_display.send_image animation.webp --anim-loops 0 --anim-speed 1.5
+    PYTHONPATH=src python3 -m msi_p13_display.send_image album/*.jpg --interval 5
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ from pathlib import Path
 
 from PIL import Image, ImageSequence
 
-from msi_p13_display.display import MsiP13Display, PID, VID, print_platform_hints
-from msi_p13_display.frame import format_image, parse_color
+from .display import MsiP13Display, PID, VID, print_platform_hints
+from .frame import format_image, parse_color
 
 ANIMATED_SUFFIXES = {".gif", ".webp"}
 ANIMATED_FORMATS = {"GIF", "WEBP"}

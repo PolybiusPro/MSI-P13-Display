@@ -20,9 +20,11 @@ source "${CONFIG_FILE}"
 export REPO_ROOT="${REPO_ROOT:-}"
 export PYTHON="${PYTHON:-/usr/bin/python3}"
 export PYTHONPATH="${PYTHONPATH:-}"
-export SCRIPT="${SCRIPT:-}"
+export SCRIPT="${PANEL_MONITOR_SCRIPT:-}"
+export PANEL_MONITOR_MODULE="${PANEL_MONITOR_MODULE:-msi_p13_display.panel_monitor}"
+export PANEL_MONITOR_SCRIPT="${PANEL_MONITOR_SCRIPT:-}"
 
-if [[ -z "${PYTHONPATH}" || -z "${SCRIPT}" ]]; then
+if [[ -z "${PYTHONPATH}" || -z "${PANEL_MONITOR_MODULE}" ]]; then
     echo "install.conf is incomplete; run ./scripts/install.sh" >&2
     exit 1
 fi
@@ -34,7 +36,8 @@ echo "XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-}"
 echo "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-}"
 echo "XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-}"
 echo "PYTHON=${PYTHON}"
-echo "SCRIPT=${SCRIPT}"
+echo "PANEL_MONITOR_MODULE=${PANEL_MONITOR_MODULE}"
+echo "PANEL_MONITOR_SCRIPT=${PANEL_MONITOR_SCRIPT:-}"
 echo "PYTHONPATH=${PYTHONPATH}"
 
 ensure_session_bus() {
@@ -52,9 +55,9 @@ ensure_session_bus() {
 
 wait_for_repo() {
     local waited=0
-    while [[ ! -x "${PYTHON}" || ! -f "${SCRIPT}" ]]; do
+    while [[ ! -x "${PYTHON}" ]] || [[ -n "${PANEL_MONITOR_SCRIPT:-}" && ! -f "${PANEL_MONITOR_SCRIPT}" ]]; do
         if (( waited >= MAX_WAIT_SECONDS )); then
-            echo "timed out waiting for repo (${PYTHON}, ${SCRIPT})"
+            echo "timed out waiting for repo (${PYTHON}, ${PANEL_MONITOR_SCRIPT:-${PANEL_MONITOR_MODULE}})"
             return 1
         fi
         echo "waiting for repo mount (${waited}s)"
@@ -140,10 +143,10 @@ wait_for_session_bus
 wait_for_vkms
 wait_for_kscreen
 
-echo "launching: ${PYTHON} ${SCRIPT} ${DRIVER_ARGS}"
+echo "launching: ${PYTHON} -m ${PANEL_MONITOR_MODULE} ${DRIVER_ARGS}"
 while true; do
     # shellcheck disable=SC2086
-    if "${PYTHON}" "${SCRIPT}" ${DRIVER_ARGS}; then
+    if "${PYTHON}" -m "${PANEL_MONITOR_MODULE}" ${DRIVER_ARGS}; then
         echo "panel monitor exited cleanly"
         exit 0
     fi

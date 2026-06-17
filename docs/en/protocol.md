@@ -9,8 +9,8 @@ Linux userspace guide for the MSI P13 USB display panel.
 | `src/msi_p13_display/display.py` | USB driver and JPEG transport |
 | `src/msi_p13_display/drm_io.py` | vkms load, kscreen output setup |
 | `src/msi_p13_display/capture.py` | vkms DRM framebuffer capture |
-| `examples/send_image.py` | Still images, GIF, animated WebP |
-| `examples/panel_monitor.py` | KDE compositor monitor streaming |
+| `src/msi_p13_display/send_image.py` | Still images, GIF, animated WebP |
+| `src/msi_p13_display/panel_monitor.py` | KDE compositor monitor streaming |
 
 ## Device
 
@@ -41,9 +41,9 @@ journalctl --user -u msi-p13-panel-monitor.service -f
 ## Usage
 
 ```bash
-python3 examples/send_image.py photo.jpg
-python3 examples/send_image.py animation.gif
-python3 examples/panel_monitor.py --shell
+PYTHONPATH=src python3 -m msi_p13_display.send_image photo.jpg
+PYTHONPATH=src python3 -m msi_p13_display.send_image animation.gif
+PYTHONPATH=src python3 -m msi_p13_display.panel_monitor --shell
 ```
 
 `panel_monitor.py` loads the vkms DRM module, enables a virtual output in Display

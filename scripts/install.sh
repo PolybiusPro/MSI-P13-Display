@@ -136,14 +136,16 @@ write_config() {
 REPO_ROOT=${ROOT}
 PYTHON=/usr/bin/python3
 PYTHONPATH=${PYTHON_SITE}
-SCRIPT=${ROOT}/examples/panel_monitor.py
+PANEL_MONITOR_MODULE=msi_p13_display.panel_monitor
+PANEL_MONITOR_SCRIPT=${ROOT}/src/msi_p13_display/panel_monitor.py
 DRIVER_ARGS="${DRIVER_ARGS}"
 EOF
     cat >"${ENV_FILE}" <<EOF
 REPO_ROOT=${ROOT}
 PYTHON=/usr/bin/python3
 PYTHONPATH=${PYTHON_SITE}
-SCRIPT=${ROOT}/examples/panel_monitor.py
+PANEL_MONITOR_MODULE=msi_p13_display.panel_monitor
+PANEL_MONITOR_SCRIPT=${ROOT}/src/msi_p13_display/panel_monitor.py
 EOF
 }
 
@@ -258,7 +260,7 @@ if [[ "${SKIP_SERVICE}" -eq 0 ]]; then
     echo
 fi
 echo "Test:"
-echo "  PYTHONPATH=${PYTHON_SITE} python3 examples/send_image.py photo.jpg"
+echo "  PYTHONPATH=${PYTHON_SITE} python3 -m msi_p13_display.send_image photo.jpg"
 echo
 echo "Remove service:"
 echo "  $(basename "$0") --remove"

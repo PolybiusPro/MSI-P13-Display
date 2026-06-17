@@ -7,9 +7,9 @@ DRM framebuffer and streams the frames to the USB panel.
 
 Examples:
 
-    python examples/panel_monitor.py
-    python examples/panel_monitor.py --shell
-    python examples/panel_monitor.py --shell konsole
+    PYTHONPATH=src python3 -m msi_p13_display.panel_monitor
+    PYTHONPATH=src python3 -m msi_p13_display.panel_monitor --shell
+    PYTHONPATH=src python3 -m msi_p13_display.panel_monitor --shell konsole
 """
 
 from __future__ import annotations
@@ -18,10 +18,10 @@ import argparse
 import sys
 import time
 
-from msi_p13_display.compositor_monitor import CompositorMonitor, default_shell
 from usb.core import USBError
 
-from msi_p13_display.display import (
+from .compositor_monitor import CompositorMonitor, default_shell
+from .display import (
     MsiP13Display,
     PID,
     UsbDeviceLostError,
@@ -29,8 +29,8 @@ from msi_p13_display.display import (
     is_device_gone_error,
     print_platform_hints,
 )
-from msi_p13_display.frame import parse_color
-from msi_p13_display.stream import stream_frames
+from .frame import parse_color
+from .stream import stream_frames
 
 
 def log(message: str, *, quiet: bool) -> None:

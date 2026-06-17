@@ -49,14 +49,14 @@ The USB panel gets a vkms DRM output (for example `Virtual-1`) in Display Settin
 Send a still image or animation:
 
 ```bash
-python3 examples/send_image.py photo.jpg
-python3 examples/send_image.py animation.gif
+PYTHONPATH=src python3 -m msi_p13_display.send_image photo.jpg
+PYTHONPATH=src python3 -m msi_p13_display.send_image animation.gif
 ```
 
 Run the panel monitor manually:
 
 ```bash
-python3 examples/panel_monitor.py --shell
+PYTHONPATH=src python3 -m msi_p13_display.panel_monitor --shell
 ```
 
 If Virtual-1 has stale resolutions from earlier runs:
@@ -76,8 +76,7 @@ USB chunk size     4096
 ## Layout
 
 ```text
-src/msi_p13_display/  display driver, vkms setup, DRM capture, streaming
-examples/             panel_monitor.py, send_image.py
+src/msi_p13_display/  driver, vkms setup, panel_monitor.py, send_image.py
 docs/en/              protocol guide
 scripts/              install.sh, udev rule, driver wrapper
 ```
