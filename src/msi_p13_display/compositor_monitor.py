@@ -42,6 +42,7 @@ class CompositorMonitor:
 
     width: int
     height: int
+    refresh: str | float = "match"
     _drm: DrmOutput | None = field(default=None, init=False, repr=False)
     _children: list[subprocess.Popen] = field(default_factory=list, init=False, repr=False)
     _capture: CaptureBackend | None = field(default=None, init=False, repr=False)
@@ -62,7 +63,7 @@ class CompositorMonitor:
         if not is_wayland_session():
             raise RuntimeError("panel_monitor requires a Wayland session.")
 
-        self._drm = prepare_drm_output(self.width, self.height)
+        self._drm = prepare_drm_output(self.width, self.height, refresh=self.refresh)
         self._capture = create_capture(self._drm)
         return self.output_name
 

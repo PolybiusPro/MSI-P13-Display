@@ -313,16 +313,71 @@ def _modes_for_size(output: dict, width: int, height: int) -> list[dict]:
     return matches
 
 
-def _best_mode_id(modes: list[dict], *, target_hz: float = 60.0) -> str | None:
+def _mode_hz(mode: dict) -> float:
+    return float(mode.get("refreshRate", 0.0))
+
+
+def _select_panel_mode_id(
+    output: dict,
+    width: int,
+    height: int,
+    target_hz: float | None,
+) -> str | None:
+    """Pick the panel-resolution mode that best avoids throttling the desktop.
+
+    ``target_hz`` is the refresh rate we want to reach or exceed (typically the
+    fastest real monitor). We choose the slowest mode that is still at or above
+    that target so KWin's shared animation clock is not dragged below the other
+    outputs. When ``target_hz`` is ``None`` or no mode reaches it, the highest
+    available refresh rate is used.
+    """
+
+    modes = _modes_for_size(output, width, height)
     if not modes:
         return None
-    best = min(modes, key=lambda mode: abs(float(mode.get("refreshRate", target_hz)) - target_hz))
+    if target_hz is None:
+        best = max(modes, key=_mode_hz)
+    else:
+        at_or_above = [mode for mode in modes if _mode_hz(mode) >= target_hz - 0.5]
+        best = min(at_or_above, key=_mode_hz) if at_or_above else max(modes, key=_mode_hz)
     mode_id = best.get("id")
     return str(mode_id) if mode_id is not None else None
 
 
-_PANEL_REFRESH_MIN_HZ = 55.0
-_PANEL_REFRESH_MAX_HZ = 65.0
+def _max_other_output_refresh_hz(panel_name: str) -> float:
+    """Highest current refresh among the other enabled outputs (real monitors)."""
+
+    panel = panel_name.lower()
+    best = 0.0
+    for output in _kscreen_outputs():
+        name = str(output.get("name") or "")
+        if name.lower() == panel or not output.get("enabled"):
+            continue
+        current = str(output.get("currentModeId", ""))
+        for mode in output.get("modes", []):
+            if str(mode.get("id")) == current:
+                best = max(best, _mode_hz(mode))
+    return best
+
+
+def _resolve_target_hz(refresh: str | float, panel_name: str) -> float | None:
+    """Translate a refresh spec ("match"/"max"/<hz>) into a target refresh.
+
+    Returns ``None`` to mean "use the highest mode available".
+    """
+
+    if isinstance(refresh, (int, float)):
+        return float(refresh)
+    spec = str(refresh).strip().lower()
+    if spec == "max":
+        return None
+    if spec == "match":
+        fastest = _max_other_output_refresh_hz(panel_name)
+        return fastest if fastest > 0 else None
+    try:
+        return float(spec)
+    except ValueError:
+        return None
 
 
 def _clear_all_custom_modes(output_name: str) -> None:
@@ -333,38 +388,6 @@ def _clear_all_custom_modes(output_name: str) -> None:
         if result.returncode != 0:
             return
         time.sleep(0.05)
-
-
-def _panel_modes_near_target_hz(
-    output: dict,
-    width: int,
-    height: int,
-    *,
-    target_hz: float = 60.0,
-) -> list[dict]:
-    matches: list[dict] = []
-    for mode in _modes_for_size(output, width, height):
-        refresh = float(mode.get("refreshRate", 0))
-        if _PANEL_REFRESH_MIN_HZ <= refresh <= _PANEL_REFRESH_MAX_HZ:
-            matches.append(mode)
-    return matches
-
-
-def _panel_mode_list_polluted(output: dict, width: int, height: int) -> bool:
-    """True when stale custom modes or duplicate bogus 480x480 entries exist."""
-
-    if output.get("customModes"):
-        return True
-
-    panel_modes = _modes_for_size(output, width, height)
-    if len(panel_modes) > 1:
-        return True
-
-    for mode in panel_modes:
-        refresh = float(mode.get("refreshRate", 0))
-        if refresh < _PANEL_REFRESH_MIN_HZ or refresh > _PANEL_REFRESH_MAX_HZ:
-            return True
-    return False
 
 
 def reload_vkms_card() -> None:
@@ -422,36 +445,21 @@ def _ensure_panel_mode_id(
     width: int,
     height: int,
     *,
+    target_hz: float | None = None,
     refresh_millihz: int = 60_000,
 ) -> str:
-    output = _find_kscreen_output(output_name)
-    if output is not None and _panel_mode_list_polluted(output, width, height):
-        reloaded = False
-        try:
-            reload_vkms_card()
-            time.sleep(0.5)
-            _wait_for_kscreen_output(output_name)
-            reloaded = True
-        except RuntimeError:
-            pass
-        if not reloaded:
-            mode_id = _best_mode_id(_modes_for_size(output, width, height))
-            if mode_id is not None:
-                return mode_id
-            raise RuntimeError(
-                "Virtual-1 has stale panel modes and vkms could not be reloaded. "
-                "Run: sudo bash scripts/reset-vkms-modes.sh "
-                "(or re-run ./scripts/install.sh for passwordless reload)"
-            )
+    """Return the kscreen mode id for the panel resolution at the wanted refresh.
 
-    _clear_all_custom_modes(output_name)
+    Existing modes are reused so we do not keep adding custom modes (and so a
+    high-refresh mode that keeps the desktop smooth is preserved). A custom mode
+    is only created when the connector has no mode at the panel resolution yet.
+    """
+
     output = _find_kscreen_output(output_name)
     if output is None:
         raise RuntimeError(f"kscreen output {output_name!r} disappeared")
 
-    mode_id = _best_mode_id(_panel_modes_near_target_hz(output, width, height))
-    if mode_id is None:
-        mode_id = _best_mode_id(_modes_for_size(output, width, height))
+    mode_id = _select_panel_mode_id(output, width, height, target_hz)
     if mode_id is not None:
         return mode_id
 
@@ -468,9 +476,7 @@ def _ensure_panel_mode_id(
     output = _find_kscreen_output(output_name)
     if output is None:
         raise RuntimeError(f"kscreen output {output_name!r} disappeared after addCustomMode")
-    mode_id = _best_mode_id(_panel_modes_near_target_hz(output, width, height))
-    if mode_id is None:
-        mode_id = _best_mode_id(_modes_for_size(output, width, height))
+    mode_id = _select_panel_mode_id(output, width, height, target_hz)
     if mode_id is None:
         raise RuntimeError(
             f"kscreen has no {width}x{height} mode for {output_name}. "
@@ -497,12 +503,17 @@ def enable_kscreen_output(
     width: int,
     height: int,
     *,
+    refresh: str | float = "match",
     refresh_millihz: int = 60_000,
 ) -> str:
     """Enable the vkms connector in KDE and return the kscreen output name.
 
-    Configures a single 480x480@60 mode for the USB panel. Stale duplicate
-    480x480 modes from earlier runs are cleared by reloading vkms when needed.
+    ``refresh`` controls the panel mode picked for the virtual output:
+
+    * ``"match"`` (default): track the fastest real monitor so KWin's shared
+      animation clock is not throttled to the panel's rate.
+    * ``"max"``: use the highest refresh mode the connector advertises.
+    * a number: target that refresh rate in Hz.
 
     Screen position is left to KScreen/Plasma so the layout you set in Display
     Settings is remembered across reboots like any other monitor.
@@ -513,10 +524,12 @@ def enable_kscreen_output(
 
     output = _wait_for_kscreen_output(connector_name)
     output_name = str(output.get("name") or connector_name)
+    target_hz = _resolve_target_hz(refresh, output_name)
     mode_id = _ensure_panel_mode_id(
         output_name,
         width,
         height,
+        target_hz=target_hz,
         refresh_millihz=refresh_millihz,
     )
 
@@ -651,13 +664,18 @@ def capture_framebuffer(card_path: Path, connector_id: int) -> Image.Image:
     return Image.frombytes("RGB", (width, height), bytes(pixels))
 
 
-def prepare_drm_output(width: int, height: int) -> DrmOutput:
+def prepare_drm_output(
+    width: int,
+    height: int,
+    *,
+    refresh: str | float = "match",
+) -> DrmOutput:
     """Load vkms, wait for a connector, and enable it through kscreen."""
 
     ensure_vkms_loaded()
     card_path = vkms_card_path()
     connector_id, connector_sysfs = wait_for_vkms_connector()
-    output_name = enable_kscreen_output(connector_sysfs, width, height)
+    output_name = enable_kscreen_output(connector_sysfs, width, height, refresh=refresh)
     _wait_for_active_framebuffer(card_path, connector_id)
     actual_width, actual_height = width, height
     output = _find_kscreen_output(output_name)

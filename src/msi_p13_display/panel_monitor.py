@@ -69,6 +69,14 @@ def main() -> int:
         default=None,
         help="target stream rate (default: device maximum, usually 60)",
     )
+    parser.add_argument(
+        "--refresh",
+        default="match",
+        help=(
+            "virtual display refresh: 'match' (track the fastest monitor so "
+            "desktop animations aren't throttled, default), 'max', or a number in Hz"
+        ),
+    )
     parser.add_argument("--duration", type=float, default=0.0, help="seconds to run, 0 = until Ctrl+C")
     parser.add_argument(
         "--fit",
@@ -116,7 +124,7 @@ def main() -> int:
         target_fps = args.fps if args.fps is not None else float(params.fps or 60)
         target_fps = min(target_fps, float(params.fps or 60))
 
-        with CompositorMonitor(params.width, params.height) as monitor:
+        with CompositorMonitor(params.width, params.height, refresh=args.refresh) as monitor:
             output_name = monitor.output_name
             log(
                 f"compositor monitor ready ({output_name}, {params.width}x{params.height})",

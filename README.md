@@ -59,6 +59,27 @@ Run the panel monitor manually:
 PYTHONPATH=src python3 -m msi_p13_display.panel_monitor --shell
 ```
 
+### Refresh rate and desktop smoothness
+
+KWin shares one animation clock across all outputs, so a virtual display
+running near 60 Hz can throttle desktop animations on faster monitors. By
+default the panel monitor uses `--refresh match`, which picks the virtual
+display mode closest to (and at or above) your fastest real monitor so the
+desktop stays smooth. The USB panel is still streamed at its own rate (≈60 fps)
+regardless of the virtual display's refresh.
+
+```bash
+# track the fastest monitor (default)
+PYTHONPATH=src python3 -m msi_p13_display.panel_monitor --refresh match
+# highest mode the virtual output advertises
+PYTHONPATH=src python3 -m msi_p13_display.panel_monitor --refresh max
+# a specific rate in Hz
+PYTHONPATH=src python3 -m msi_p13_display.panel_monitor --refresh 120
+```
+
+Note: vkms only advertises 480×480 modes up to ~108 Hz, so on a 144 Hz+ monitor
+the panel picks the highest available rate rather than an exact match.
+
 If Virtual-1 has stale resolutions from earlier runs:
 
 ```bash
